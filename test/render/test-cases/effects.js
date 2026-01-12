@@ -53,7 +53,7 @@ export default [
       new ColumnLayer({
         id: 'column-layer',
         data: hexagons,
-        radius: 250,
+        radiusScale: 250,
         angle: Math.PI / 2,
         coverage: 1,
         extruded: true,

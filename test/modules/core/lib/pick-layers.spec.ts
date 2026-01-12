@@ -781,7 +781,7 @@ test('pickingTest#unproject3D', async t => {
       new ColumnLayer({
         data: [VIEW_STATE],
         getPosition: d => [d.longitude, d.latitude],
-        radius: 100,
+        radiusScale: 100,
         extruded: true,
         getElevation: 1000,
         getFillColor: [255, 0, 0],

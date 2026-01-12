@@ -31,7 +31,7 @@ const DEFAULT_COLOR: [number, number, number, number] = [0, 0, 0, 255];
 const defaultProps: DefaultProps<ColumnLayerProps> = {
   diskResolution: {type: 'number', min: 4, value: 20},
   vertices: null,
-  radius: {type: 'number', min: 0, value: 1000},
+  radiusScale: {type: 'number', min: 0, value: 1000},
   angle: {type: 'number', value: 0},
   offset: {type: 'array', value: [0, 0]},
   coverage: {type: 'number', min: 0, max: 1, value: 1},
@@ -71,10 +71,10 @@ type _ColumnLayerProps<DataT> = {
   diskResolution?: number;
 
   /**
-   * isk size in units specified by `radiusUnits`.
+   * Disk size in units specified by `radiusUnits`.
    * @default 1000
    */
-  radius?: number;
+  radiusScale?: number;
 
   /**
    * Disk rotation, counter-clockwise in degrees.
@@ -401,7 +401,7 @@ export default class ColumnLayer<DataT = any, ExtraPropsT extends {} = {}> exten
       wireframe,
       offset,
       coverage,
-      radius,
+      radiusScale,
       angle
     } = this.props;
     const fillModel = this.state.fillModel!;
@@ -409,7 +409,7 @@ export default class ColumnLayer<DataT = any, ExtraPropsT extends {} = {}> exten
     const {fillVertexCount, edgeDistance} = this.state;
 
     const columnProps: Omit<ColumnProps, 'isStroke'> = {
-      radius,
+      radius: radiusScale,
       angle: (angle / 180) * Math.PI,
       offset,
       extruded,

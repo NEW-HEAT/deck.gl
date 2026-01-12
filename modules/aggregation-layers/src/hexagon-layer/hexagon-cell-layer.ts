@@ -95,7 +95,7 @@ export default class HexagonCellLayer<ExtraPropsT extends {} = {}> extends Colum
 
   draw({uniforms}) {
     const {
-      radius,
+      radiusScale,
       hexOriginCommon,
       elevationRange,
       elevationScale,
@@ -133,7 +133,7 @@ export default class HexagonCellLayer<ExtraPropsT extends {} = {}> extends Colum
     };
 
     fillModel.shaderInputs.setProps({
-      column: {extruded, coverage, radius},
+      column: {extruded, coverage, radius: radiusScale},
       hexagon: hexagonProps
     });
     fillModel.draw(this.context.renderPass);

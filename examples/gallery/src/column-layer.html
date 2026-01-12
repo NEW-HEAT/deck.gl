@@ -35,7 +35,7 @@
           data:
             'https://raw.githubusercontent.com/visgl/deck.gl-data/master/website/hexagons.json',
           diskResolution: 12,
-          radius: 250,
+          radiusScale: 250,
           elevationScale: 5000,
           getPosition: d => d.centroid,
           getFillColor: d => [48, 128, d.value * 255, 255],
