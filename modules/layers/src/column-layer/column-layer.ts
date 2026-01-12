@@ -55,7 +55,10 @@ const defaultProps: DefaultProps<ColumnLayerProps> = {
   getLineWidth: {type: 'accessor', value: 1},
   getElevation: {type: 'accessor', value: 1000},
   material: true,
-  getColor: {deprecatedFor: ['getFillColor', 'getLineColor']}
+  getColor: {deprecatedFor: ['getFillColor', 'getLineColor']},
+
+  // deprecated
+  radius: {deprecatedFor: 'radiusScale'}
 };
 
 /** All properties supported by ColumnLayer. */
@@ -216,6 +219,11 @@ type _ColumnLayerProps<DataT> = {
    * @default 1
    */
   getLineWidth?: Accessor<DataT, number>;
+
+  /**
+   * @deprecated Use radiusScale instead
+   */
+  radius?: number;
 };
 
 /** Render extruded cylinders (tessellated regular polygons) at given coordinates. */

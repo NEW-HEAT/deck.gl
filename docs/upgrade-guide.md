@@ -38,6 +38,26 @@ Breaking changes:
 
 - `PointLight.attenuation` was previously ignored. To retain old behavior, use the default (`[1, 0, 0]`).
 
+### ColumnLayer
+
+Deprecations:
+
+- The `radius` prop is now deprecated and has been renamed to `radiusScale` to be consistent with other layers (e.g., `ScatterplotLayer`). The old `radius` prop will continue to work but will be removed in a future version.
+
+```ts
+// Before (deprecated - still works but will be removed in a future version)
+new ColumnLayer({
+  radius: 250,
+  // ...
+})
+
+// After (recommended)
+new ColumnLayer({
+  radiusScale: 250,
+  // ...
+})
+```
+
 ### Uniform buffers
 
 GLSL shaders that take inputs via WebGL1-style uniforms need to be migrated to use uniform buffers instead. For example:

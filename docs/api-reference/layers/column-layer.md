@@ -335,6 +335,12 @@ The width of the outline of the column, in units specified by `lineWidthUnits` (
 * If a number is provided, it is used as the outline width for all columns.
 * If a function is provided, it is called on each object to retrieve its outline width.
 
+## Deprecated Props
+
+#### `radius` (deprecated) {#radius}
+
+Use `radiusScale` instead. The `radius` prop will be removed in a future version.
+
 ## Source
 
 [modules/layers/src/column-layer](https://github.com/visgl/deck.gl/tree/master/modules/layers/src/column-layer)
