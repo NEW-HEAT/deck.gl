@@ -22,7 +22,7 @@ const layer = new ColumnLayer({
   data: 'https://raw.githubusercontent.com/visgl/deck.gl-data/master/website/hexagons.json',
   diskResolution: 12,
   extruded: true,
-  radius: 250,
+  radiusScale: 250,
   elevationScale: 5000,
   getElevation: d => d.value,
   getFillColor: d => [48, 128, d.value * 255, 255],
@@ -59,7 +59,7 @@ const layer = new ColumnLayer<DataType>({
   data: 'https://raw.githubusercontent.com/visgl/deck.gl-data/master/website/hexagons.json',
   diskResolution: 12,
   extruded: true,
-  radius: 250,
+  radiusScale: 250,
   elevationScale: 5000,
   getElevation: (d: DataType) => d.value,
   getFillColor: (d: DataType) => [48, 128, d.value * 255, 255],
@@ -99,7 +99,7 @@ function App() {
     data: 'https://raw.githubusercontent.com/visgl/deck.gl-data/master/website/hexagons.json',
     diskResolution: 12,
     extruded: true,
-    radius: 250,
+    radiusScale: 250,
     elevationScale: 5000,
     getElevation: (d: DataType) => d.value,
     getFillColor: (d: DataType) => [48, 128, d.value * 255, 255],
@@ -167,7 +167,7 @@ Inherits from all [Base Layer](../core/layer.md) properties.
 
 The number of sides to render the disk as. The disk is a regular polygon that fits inside the given radius. A higher resolution will yield a smoother look close-up, but also need more resources to render.
 
-#### `radius` (number, optional) ![transition-enabled](https://img.shields.io/badge/transition-enabled-green.svg?style=flat-square") {#radius}
+#### `radiusScale` (number, optional) ![transition-enabled](https://img.shields.io/badge/transition-enabled-green.svg?style=flat-square") {#radiusscale}
 
 * Default: `1000`
 
@@ -194,7 +194,7 @@ Disk offset from the position, relative to the radius. By default, the disk is c
 * Default: `1`
 
 Radius multiplier, between 0 - 1. The radius of the disk is calculated by
-`coverage * radius`
+`coverage * radiusScale`
 
 #### `elevationScale` (number, optional) ![transition-enabled](https://img.shields.io/badge/transition-enabled-green.svg?style=flat-square") {#elevationscale}
 
@@ -334,6 +334,12 @@ The width of the outline of the column, in units specified by `lineWidthUnits` (
 
 * If a number is provided, it is used as the outline width for all columns.
 * If a function is provided, it is called on each object to retrieve its outline width.
+
+## Deprecated Props
+
+#### `radius` (deprecated) {#radius}
+
+Use `radiusScale` instead. The `radius` prop will be removed in a future version.
 
 ## Source
 

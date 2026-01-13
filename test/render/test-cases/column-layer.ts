@@ -36,7 +36,7 @@ function genColumnLayerTestCase(settings, props = {}, visState = {}): SnapshotTe
       new ColumnLayer({
         id: settings.name,
         data: hexagons,
-        radius: 250,
+        radiusScale: 250,
         angle: Math.PI / 2,
         coverage: 1,
         getPosition: h => h.centroid,

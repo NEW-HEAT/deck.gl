@@ -72,7 +72,7 @@ export const deck = new Deck({
       data: AIR_PORTS,
       dataTransform: geojson => geojson.features,
       // Styles
-      radius: 10000,
+      radiusScale: 10000,
       extruded: true,
       getPosition: f => f.geometry.coordinates,
       getElevation: f => f.properties.scalerank * 100000,

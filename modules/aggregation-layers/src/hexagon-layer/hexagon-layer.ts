@@ -603,7 +603,7 @@ export default class HexagonLayer<
         },
         diskResolution: 6,
         vertices: HexbinVertices,
-        radius: radiusCommon,
+        radiusScale: radiusCommon,
         hexOriginCommon,
         elevationScale,
         colorRange,

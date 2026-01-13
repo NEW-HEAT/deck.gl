@@ -284,7 +284,7 @@ const ColumnLayerExample = {
     data: dataSamples.worldGrid.data,
     extruded: true,
     pickable: true,
-    radius: 100,
+    radiusScale: 100,
     opacity: 1,
     getFillColor: d => [245, 166, d.value * 255, 255],
     getElevation: d => d.value * 5000
@@ -297,7 +297,7 @@ const ColumnLayerExample = {
   props: {
     id: 'ColumnLayer',
     data: dataSamples.hexagons,
-    radius: 100,
+    radiusScale: 100,
     diskResolution: 6,
     coverage: 1,
     extruded: true,

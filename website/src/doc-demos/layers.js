@@ -53,7 +53,7 @@ export const ColumnLayerDemo = makeLayerDemo({
   props: `{
     data: '${DATA_URI}/hexagons.json',
     diskResolution: 12,
-    radius: 250,
+    radiusScale: 250,
     extruded: true,
     pickable: true,
     elevationScale: 5000,

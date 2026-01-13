@@ -35,7 +35,7 @@ function createLayer(capShape, diskResolution) {
     id: 'column-layer',
     data: data,
     diskResolution: diskResolution,
-    radius: 200,
+    radiusScale: 200,
     extruded: true,
     capShape: capShape, // NEW: 'flat', 'rounded', or 'pointy'
     elevationScale: 1,
