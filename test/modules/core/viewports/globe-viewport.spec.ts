@@ -182,3 +182,50 @@ test('GlobeViewport#getBounds', t => {
 
   t.end();
 });
+
+test('GlobeViewport#bearing', t => {
+  // Test viewport with default bearing (0)
+  const viewport0 = new GlobeViewport({
+    width: 800,
+    height: 600,
+    latitude: 38,
+    longitude: -122,
+    zoom: 4
+  });
+  t.equal(viewport0.bearing, 0, 'Default bearing is 0');
+
+  // Test viewport with non-zero bearing
+  const viewport45 = new GlobeViewport({
+    width: 800,
+    height: 600,
+    latitude: 38,
+    longitude: -122,
+    zoom: 4,
+    bearing: 45
+  });
+  t.equal(viewport45.bearing, 45, 'Bearing is set correctly');
+
+  // Test that center projection still works with bearing
+  const screenCenter = viewport45.project([viewport45.longitude, viewport45.latitude, 0]);
+  t.ok(
+    Math.abs(screenCenter[0] - viewport45.width / 2) < 1,
+    'viewport center is projected to screen center x with bearing'
+  );
+  t.ok(
+    Math.abs(screenCenter[1] - viewport45.height / 2) < 1,
+    'viewport center is projected to screen center y with bearing'
+  );
+
+  // Test viewport with negative bearing
+  const viewportNeg90 = new GlobeViewport({
+    width: 800,
+    height: 600,
+    latitude: 38,
+    longitude: -122,
+    zoom: 4,
+    bearing: -90
+  });
+  t.equal(viewportNeg90.bearing, -90, 'Negative bearing is set correctly');
+
+  t.end();
+});
