@@ -3,7 +3,7 @@
 // Copyright (c) vis.gl contributors
 
 import test from 'tape-promise/tape';
-import {MapController, OrbitController, FirstPersonController} from '@deck.gl/core';
+import {MapController, OrbitController, FirstPersonController, _GlobeController as GlobeController} from '@deck.gl/core';
 
 test('MapViewState', t => {
   const MapViewState = new MapController({
@@ -126,6 +126,42 @@ test('FirstPersonViewState', t => {
   const transitionViewportProps = viewState2.shortestPathFrom(viewState);
   t.is(transitionViewportProps.longitude, 200, 'found shortest path for longitude');
   t.is(transitionViewportProps.bearing, -240, 'found shortest path for rotationOrbit');
+
+  t.end();
+});
+
+test('GlobeViewState', t => {
+  const GlobeViewState = new GlobeController({
+    longitude: 0,
+    latitude: 0,
+    zoom: 0
+  }).ControllerState;
+
+  const viewState = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: -182,
+    latitude: 36,
+    zoom: 0,
+    bearing: 180
+  });
+  const viewportProps = viewState.getViewportProps();
+
+  t.is(viewportProps.longitude, 178, 'longitude is normalized');
+  t.ok(viewportProps.bearing !== undefined, 'bearing is defined');
+
+  const viewState2 = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: -160,
+    latitude: 0,
+    zoom: 0,
+    bearing: -30
+  });
+
+  const transitionViewportProps = viewState2.shortestPathFrom(viewState);
+  t.is(transitionViewportProps.longitude, 200, 'found shortest path for longitude');
+  t.is(transitionViewportProps.bearing, 330, 'found shortest path for bearing');
 
   t.end();
 });

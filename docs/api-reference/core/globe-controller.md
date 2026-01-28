@@ -38,9 +38,9 @@ new Deck({
 Supports all [Controller options](./controller.md#options) with the following default behavior:
 
 - `dragPan`: default `'pan'` (drag to pan)
-- `dragRotate`: not effective, this view does not currently support rotation
-- `touchRotate`: not effective, this view does not currently support rotation
-- `keyboard`: arrow keys to pan, +/- to zoom
+- `dragRotate`: default `true` (drag with function key to rotate/change bearing)
+- `touchRotate`: default `false` (two-finger rotate gesture to change bearing)
+- `keyboard`: arrow keys to pan, +/- to zoom, shift+left/right to rotate
 
 ## Custom GlobeController
 

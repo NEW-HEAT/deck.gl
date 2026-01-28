@@ -69,6 +69,75 @@ class GlobeState extends MapState {
     return this._getUpdatedState({zoom});
   }
 
+  /**
+   * Start rotating
+   * @param {[Number, Number]} pos - position on screen where the center is
+   */
+  rotateStart({pos}: {pos: [number, number]}): GlobeState {
+    return this._getUpdatedState({
+      startRotatePos: pos,
+      startBearing: this.getViewportProps().bearing || 0
+    }) as GlobeState;
+  }
+
+  /**
+   * Rotate the globe (change bearing)
+   * For GlobeView, rotation means changing the bearing angle (camera rotation around its view axis)
+   */
+  rotate({
+    pos,
+    deltaAngleX = 0
+  }: {
+    pos?: [number, number];
+    deltaAngleX?: number;
+    deltaAngleY?: number;
+  }): GlobeState {
+    const {startRotatePos, startBearing} = this.getState();
+
+    if (startBearing === undefined) {
+      return this;
+    }
+
+    let newBearing: number;
+    if (pos && startRotatePos) {
+      // Calculate bearing change based on horizontal mouse movement
+      const {width} = this.getViewportProps();
+      const deltaX = pos[0] - startRotatePos[0];
+      const deltaScaleX = deltaX / width;
+      newBearing = startBearing + 180 * deltaScaleX;
+    } else {
+      newBearing = startBearing + deltaAngleX;
+    }
+
+    return this._getUpdatedState({bearing: newBearing}) as GlobeState;
+  }
+
+  /**
+   * End rotating
+   */
+  rotateEnd(): GlobeState {
+    return this._getUpdatedState({
+      startRotatePos: null,
+      startBearing: null
+    }) as GlobeState;
+  }
+
+  /**
+   * Rotate left (decrease bearing)
+   */
+  rotateLeft(speed: number = 15): GlobeState {
+    const bearing = (this.getViewportProps().bearing || 0) - speed;
+    return this._getUpdatedState({bearing}) as GlobeState;
+  }
+
+  /**
+   * Rotate right (increase bearing)
+   */
+  rotateRight(speed: number = 15): GlobeState {
+    const bearing = (this.getViewportProps().bearing || 0) + speed;
+    return this._getUpdatedState({bearing}) as GlobeState;
+  }
+
   applyConstraints(props: Required<MapStateProps>): Required<MapStateProps> {
     // Ensure zoom is within specified range
     const {longitude, latitude, maxZoom, minZoom, zoom} = props;
@@ -82,6 +151,31 @@ class GlobeState extends MapState {
     }
     props.latitude = clamp(latitude, -MAX_LATITUDE, MAX_LATITUDE);
 
+    // Normalize bearing to [-180, 180]
+    if (props.bearing !== undefined) {
+      if (props.bearing < -180 || props.bearing > 180) {
+        props.bearing = mod(props.bearing + 180, 360) - 180;
+      }
+    }
+
+    return props;
+  }
+
+  shortestPathFrom(viewState: MapState): MapStateProps {
+    const fromProps = viewState.getViewportProps();
+    const props = {...this.getViewportProps()};
+    const {bearing, longitude} = props;
+
+    // Normalize bearing for shortest path interpolation
+    if (bearing !== undefined && fromProps.bearing !== undefined) {
+      if (Math.abs(bearing - fromProps.bearing) > 180) {
+        props.bearing = bearing < 0 ? bearing + 360 : bearing - 360;
+      }
+    }
+
+    if (Math.abs(longitude - fromProps.longitude) > 180) {
+      props.longitude = longitude < 0 ? longitude + 360 : longitude - 360;
+    }
     return props;
   }
 }
@@ -91,7 +185,7 @@ export default class GlobeController extends Controller<MapState> {
 
   transition = {
     transitionDuration: 300,
-    transitionInterpolator: new LinearInterpolator(['longitude', 'latitude', 'zoom'])
+    transitionInterpolator: new LinearInterpolator(['longitude', 'latitude', 'zoom', 'bearing'])
   };
 
   dragMode: 'pan' | 'rotate' = 'pan';
@@ -99,8 +193,9 @@ export default class GlobeController extends Controller<MapState> {
   setProps(props: ControllerProps) {
     super.setProps(props);
 
-    // TODO - support pitching?
-    this.dragRotate = false;
-    this.touchRotate = false;
+    // GlobeView now supports bearing rotation
+    // Pitch is still not supported as it would require more complex camera math
+    // Note: dragRotate/touchRotate are enabled by default in the base Controller
+    // Users can still disable them via props if desired
   }
 }

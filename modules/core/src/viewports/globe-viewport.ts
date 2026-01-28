@@ -44,6 +44,8 @@ export type GlobeViewportOptions = {
   longitude?: number;
   /** Latitude in degrees */
   latitude?: number;
+  /** Bearing angle in degrees. Default `0` (north up). */
+  bearing?: number;
   /** Camera altitude relative to the viewport height, used to control the FOV. Default `1.5` */
   altitude?: number;
   /* Meter offsets of the viewport center from lng, lat, elevation */
@@ -71,12 +73,14 @@ export default class GlobeViewport extends Viewport {
 
   longitude: number;
   latitude: number;
+  bearing: number;
   fovy: number;
   resolution: number;
 
   constructor(opts: GlobeViewportOptions = {}) {
     const {
       longitude = 0,
+      bearing = 0,
       zoom = 0,
       // Matches Maplibre defaults
       // https://github.com/maplibre/maplibre-gl-js/blob/f8ab4b48d59ab8fe7b068b102538793bbdd4c848/src/geo/projection/globe_transform.ts#L632-L633
@@ -104,7 +108,14 @@ export default class GlobeViewport extends Viewport {
     const farZ = opts.farZ ?? (altitude + (GLOBE_RADIUS * 2 * scale) / height) * farZMultiplier;
 
     // Calculate view matrix
+    // The view matrix rotates the globe to show the correct location and orientation
+    // 1. Start with camera looking at origin from -Y axis (north up = +Z)
+    // 2. Rotate around Y axis by bearing (camera rotation around its view axis)
+    // 3. Rotate around X axis by latitude (tilt to show correct latitude)
+    // 4. Rotate around Z axis by -longitude (spin globe to show correct longitude)
     const viewMatrix = new Matrix4().lookAt({eye: [0, -altitude, 0], up: [0, 0, 1]});
+    // Apply bearing rotation (rotate camera around its view axis)
+    viewMatrix.rotateY(bearing * DEGREES_TO_RADIANS);
     viewMatrix.rotateX(latitude * DEGREES_TO_RADIANS);
     viewMatrix.rotateZ(-longitude * DEGREES_TO_RADIANS);
     viewMatrix.scale(scale / height);
@@ -131,6 +142,7 @@ export default class GlobeViewport extends Viewport {
     this.scale = scale;
     this.latitude = latitude;
     this.longitude = longitude;
+    this.bearing = bearing;
     this.fovy = fovy;
     this.resolution = resolution;
   }

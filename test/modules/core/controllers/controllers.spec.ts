@@ -46,10 +46,10 @@ test('GlobeController', async t => {
     {
       longitude: -122.45,
       latitude: 37.78,
-      zoom: 0
-    },
-    // GlobeView cannot be rotated
-    ['pan#function key', 'pinch', 'multipan']
+      zoom: 0,
+      bearing: 0
+    }
+    // GlobeView now supports bearing rotation
   );
 
   t.end();
