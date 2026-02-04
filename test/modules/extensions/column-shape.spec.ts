@@ -149,6 +149,77 @@ test('ColumnShapeExtension#ColumnLayer', t => {
           'custom bevel has bulge=0.3'
         );
       }
+    },
+    // Edge cases: negative values and very large values
+    {
+      updateProps: {
+        getBevel: {segs: -1, height: -10, bulge: -0.5},
+        updateTriggers: {
+          getBevel: 5
+        }
+      },
+      onAfterUpdate: ({layer}) => {
+        const attributes = layer.getAttributeManager().getAttributes();
+
+        // Negative values should be passed through (shader handles clamping)
+        t.deepEqual(
+          Array.from(attributes.instanceBevelSegs.value.slice(0, 3)),
+          [-1, -1, -1],
+          'negative segs value is passed through'
+        );
+        t.deepEqual(
+          Array.from(attributes.instanceBevelHeights.value.slice(0, 3)),
+          [-10, -10, -10],
+          'negative height value is passed through'
+        );
+      }
+    },
+    // Edge case: partial object (missing properties use defaults)
+    {
+      updateProps: {
+        getBevel: {segs: 10},
+        updateTriggers: {
+          getBevel: 6
+        }
+      },
+      onAfterUpdate: ({layer}) => {
+        const attributes = layer.getAttributeManager().getAttributes();
+
+        // Only segs provided, height and bulge should default to 0
+        t.deepEqual(
+          Array.from(attributes.instanceBevelSegs.value.slice(0, 3)),
+          [10, 10, 10],
+          'partial object: segs=10'
+        );
+        t.deepEqual(
+          Array.from(attributes.instanceBevelHeights.value.slice(0, 3)),
+          [0, 0, 0],
+          'partial object: height defaults to 0'
+        );
+        t.deepEqual(
+          Array.from(attributes.instanceBevelBulge.value.slice(0, 3)),
+          [0, 0, 0],
+          'partial object: bulge defaults to 0'
+        );
+      }
+    },
+    // Edge case: getRadius with zero value
+    {
+      updateProps: {
+        getRadius: 0,
+        updateTriggers: {
+          getRadius: 2
+        }
+      },
+      onAfterUpdate: ({layer}) => {
+        const attributes = layer.getAttributeManager().getAttributes();
+
+        t.deepEqual(
+          Array.from(attributes.instanceRadii.value.slice(0, 3)),
+          [0, 0, 0],
+          'zero radius is supported'
+        );
+      }
     }
   ];
 

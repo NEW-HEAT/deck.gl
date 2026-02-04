@@ -67,14 +67,18 @@ const inject = {
         if (capProgress > 0.0) {
           // Cone shape (bevelSegs == 2)
           if (bevelSegs < 3.0) {
-            // For cone, bevelHeight determines the apex height above the column top
+            // For cone, bevelHeight determines the apex height above the column top.
+            // bevelHeight is in the same units as elevation (typically meters).
+            // The cone is capped at the column's elevation to avoid extending above.
             float coneHeight = min(bevelHeight, elevation);
             float zOffset = capProgress * coneHeight;
             geometry.position.z += zOffset;
           }
           // Dome shape (bevelSegs >= 3)
           else {
-            // Spherical cap calculation
+            // Spherical cap calculation.
+            // bevelHeight controls the dome radius in world units (same as elevation).
+            // A value of 1.0 creates a unit sphere cap; larger values create larger domes.
             float domeRadius = bevelHeight > 0.0 ? bevelHeight : 1.0;
             float u = radialDist;
 
@@ -95,6 +99,8 @@ const inject = {
 
   // Adjust normals for bevel shapes
   'vs:#decl': /* glsl */ `
+    // Utility function to calculate adjusted normals for bevel shapes.
+    // Note: radialDist division is safe because we return early if radialDist < 0.001
     vec3 columnShape_adjustNormal(vec3 normal, vec3 position, float bevelSegs, float bevelHeight, float bevelBulge) {
       if (bevelSegs < 2.0) {
         return normal; // Flat top, no adjustment
@@ -108,7 +114,7 @@ const inject = {
 
       vec2 radialDir = normalize(position.xy);
 
-      // Cone normal
+      // Cone normal - radialDist is guaranteed >= 0.001 here
       if (bevelSegs < 3.0) {
         float coneSlope = bevelHeight / radialDist;
         vec3 coneNormal = normalize(vec3(radialDir, coneSlope));
