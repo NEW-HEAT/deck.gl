@@ -9,7 +9,7 @@ import {MapState, MapStateProps} from './map-controller';
 import type {MapStateInternal} from './map-controller';
 import {mod} from '../utils/math-utils';
 import LinearInterpolator from '../transitions/linear-interpolator';
-import {zoomAdjust} from '../viewports/globe-viewport';
+import {zoomAdjust, DEFAULT_MIN_PITCH, DEFAULT_MAX_PITCH} from '../viewports/globe-viewport';
 
 import {MAX_LATITUDE} from '@math.gl/web-mercator';
 
@@ -62,11 +62,45 @@ class GlobeState extends MapState {
     }) as GlobeState;
   }
 
-  zoom({scale}: {scale: number}): MapState {
-    // In Globe view zoom does not take into account the mouse position
-    const startZoom = this.getState().startZoom || this.getViewportProps().zoom;
-    const zoom = startZoom + Math.log2(scale);
-    return this._getUpdatedState({zoom});
+  zoom({
+    pos,
+    startPos,
+    scale
+  }: {
+    pos: [number, number];
+    startPos?: [number, number];
+    scale: number;
+  }): GlobeState {
+    // Make sure we zoom around the current mouse position rather than map center
+    let {startZoom, startZoomLngLat} = this.getState();
+
+    if (!startZoomLngLat) {
+      // We have two modes of zoom:
+      // scroll zoom that are discrete events (transform from the current zoom level),
+      // and pinch zoom that are continuous events (transform from the zoom level when
+      // pinch started).
+      // If startZoom state is defined, then use the startZoom state;
+      // otherwise assume discrete zooming
+      startZoom = this.getViewportProps().zoom;
+      startZoomLngLat = this._unproject(startPos) || this._unproject(pos);
+    }
+    if (!startZoomLngLat) {
+      // Fallback: zoom without following cursor
+      const currentZoom = this.getState().startZoom || this.getViewportProps().zoom;
+      const newZoom = currentZoom + Math.log2(scale);
+      return this._getUpdatedState({zoom: newZoom}) as GlobeState;
+    }
+
+    const {maxZoom, minZoom} = this.getViewportProps();
+    let zoom = (startZoom as number) + Math.log2(scale);
+    zoom = clamp(zoom, minZoom, maxZoom);
+
+    const zoomedViewport = this.makeViewport({...this.getViewportProps(), zoom});
+
+    return this._getUpdatedState({
+      zoom,
+      ...zoomedViewport.panByPosition(startZoomLngLat, pos)
+    }) as GlobeState;
   }
 
   /**
@@ -76,40 +110,57 @@ class GlobeState extends MapState {
   rotateStart({pos}: {pos: [number, number]}): GlobeState {
     return this._getUpdatedState({
       startRotatePos: pos,
-      startBearing: this.getViewportProps().bearing || 0
+      startBearing: this.getViewportProps().bearing || 0,
+      startPitch: this.getViewportProps().pitch || 0
     }) as GlobeState;
   }
 
   /**
-   * Rotate the globe (change bearing)
-   * For GlobeView, rotation means changing the bearing angle (camera rotation around its view axis)
+   * Rotate the globe (change bearing and pitch)
+   * For GlobeView, rotation includes:
+   * - Bearing: camera rotation around its view axis (compass direction)
+   * - Pitch: camera tilt angle (looking at globe from above vs from the side)
    */
   rotate({
     pos,
-    deltaAngleX = 0
+    deltaAngleX = 0,
+    deltaAngleY = 0
   }: {
     pos?: [number, number];
     deltaAngleX?: number;
     deltaAngleY?: number;
   }): GlobeState {
-    const {startRotatePos, startBearing} = this.getState();
+    const {startRotatePos, startBearing, startPitch} = this.getState();
 
-    if (startBearing === undefined) {
+    let newBearing: number;
+    let newPitch: number;
+
+    if (pos && startRotatePos && startBearing !== undefined && startPitch !== undefined) {
+      // Calculate bearing and pitch change based on mouse movement
+      const {width, height} = this.getViewportProps();
+      const deltaX = pos[0] - startRotatePos[0];
+      const deltaY = pos[1] - startRotatePos[1];
+      const deltaScaleX = deltaX / width;
+      const deltaScaleY = deltaY / height;
+      newBearing = startBearing + 180 * deltaScaleX;
+      // Invert deltaY for natural feel (drag down = look up)
+      newPitch = startPitch - 90 * deltaScaleY;
+    } else if (deltaAngleX !== 0 || deltaAngleY !== 0) {
+      // Handle deltaAngleX/Y from pinch rotation or direct call
+      const currentBearing = startBearing ?? this.getViewportProps().bearing ?? 0;
+      const currentPitch = startPitch ?? this.getViewportProps().pitch ?? 0;
+      newBearing = currentBearing + deltaAngleX;
+      newPitch = currentPitch + deltaAngleY;
+    } else if (startBearing !== undefined) {
+      // Maintain current values
+      newBearing = startBearing;
+      newPitch = startPitch ?? this.getViewportProps().pitch ?? 0;
+    } else {
+      // No rotation data available
       return this;
     }
 
-    let newBearing: number;
-    if (pos && startRotatePos) {
-      // Calculate bearing change based on horizontal mouse movement
-      const {width} = this.getViewportProps();
-      const deltaX = pos[0] - startRotatePos[0];
-      const deltaScaleX = deltaX / width;
-      newBearing = startBearing + 180 * deltaScaleX;
-    } else {
-      newBearing = startBearing + deltaAngleX;
-    }
-
-    return this._getUpdatedState({bearing: newBearing}) as GlobeState;
+    return this._getUpdatedState({bearing: newBearing, pitch: newPitch}) as GlobeState;
   }
 
   /**
@@ -118,7 +169,8 @@ class GlobeState extends MapState {
   rotateEnd(): GlobeState {
     return this._getUpdatedState({
       startRotatePos: null,
-      startBearing: null
+      startBearing: null,
+      startPitch: null
     }) as GlobeState;
   }
 
@@ -136,6 +188,22 @@ class GlobeState extends MapState {
   rotateRight(speed: number = 15): GlobeState {
     const bearing = (this.getViewportProps().bearing || 0) + speed;
     return this._getUpdatedState({bearing}) as GlobeState;
+  }
+
+  /**
+   * Rotate up (decrease pitch - look more from above)
+   */
+  rotateUp(speed: number = 10): GlobeState {
+    const pitch = (this.getViewportProps().pitch || 0) - speed;
+    return this._getUpdatedState({pitch}) as GlobeState;
+  }
+
+  /**
+   * Rotate down (increase pitch - look more from the side)
+   */
+  rotateDown(speed: number = 10): GlobeState {
+    const pitch = (this.getViewportProps().pitch || 0) + speed;
+    return this._getUpdatedState({pitch}) as GlobeState;
   }
 
   applyConstraints(props: Required<MapStateProps>): Required<MapStateProps> {
@@ -156,6 +224,13 @@ class GlobeState extends MapState {
       if (props.bearing < -180 || props.bearing > 180) {
         props.bearing = mod(props.bearing + 180, 360) - 180;
       }
+    }
+
+    // Clamp pitch to valid range
+    if (props.pitch !== undefined) {
+      const minPitch = props.minPitch ?? DEFAULT_MIN_PITCH;
+      const maxPitch = props.maxPitch ?? DEFAULT_MAX_PITCH;
+      props.pitch = clamp(props.pitch, minPitch, maxPitch);
     }
 
     return props;
@@ -185,7 +260,13 @@ export default class GlobeController extends Controller<MapState> {
 
   transition = {
     transitionDuration: 300,
-    transitionInterpolator: new LinearInterpolator(['longitude', 'latitude', 'zoom', 'bearing'])
+    transitionInterpolator: new LinearInterpolator([
+      'longitude',
+      'latitude',
+      'zoom',
+      'bearing',
+      'pitch'
+    ])
   };
 
   dragMode: 'pan' | 'rotate' = 'pan';
@@ -193,8 +274,7 @@ export default class GlobeController extends Controller<MapState> {
   setProps(props: ControllerProps) {
     super.setProps(props);
 
-    // GlobeView now supports bearing rotation
-    // Pitch is still not supported as it would require more complex camera math
+    // GlobeView now supports bearing and pitch rotation
     // Note: dragRotate/touchRotate are enabled by default in the base Controller
     // Users can still disable them via props if desired
   }

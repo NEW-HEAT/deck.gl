@@ -15,6 +15,10 @@ const RADIANS_TO_DEGREES = 180 / Math.PI;
 const EARTH_RADIUS = 6370972;
 const GLOBE_RADIUS = 256;
 
+// Pitch constraints for GlobeView
+export const DEFAULT_MIN_PITCH = 0;
+export const DEFAULT_MAX_PITCH = 85;
+
 function getDistanceScales() {
   const unitsPerMeter = GLOBE_RADIUS / EARTH_RADIUS;
   const unitsPerDegree = (Math.PI / 180) * GLOBE_RADIUS;
@@ -46,6 +50,8 @@ export type GlobeViewportOptions = {
   latitude?: number;
   /** Bearing angle in degrees. Default `0` (north up). */
   bearing?: number;
+  /** Pitch angle in degrees. Default `0` (looking straight down at globe center). */
+  pitch?: number;
   /** Camera altitude relative to the viewport height, used to control the FOV. Default `1.5` */
   altitude?: number;
   /* Meter offsets of the viewport center from lng, lat, elevation */
@@ -74,6 +80,7 @@ export default class GlobeViewport extends Viewport {
   longitude: number;
   latitude: number;
   bearing: number;
+  pitch: number;
   fovy: number;
   resolution: number;
 
@@ -81,6 +88,7 @@ export default class GlobeViewport extends Viewport {
     const {
       longitude = 0,
       bearing = 0,
+      pitch = 0,
       zoom = 0,
       // Matches Maplibre defaults
       // https://github.com/maplibre/maplibre-gl-js/blob/f8ab4b48d59ab8fe7b068b102538793bbdd4c848/src/geo/projection/globe_transform.ts#L632-L633
@@ -93,6 +101,8 @@ export default class GlobeViewport extends Viewport {
 
     // Clamp to web mercator limit to prevent bad inputs
     latitude = Math.max(Math.min(latitude, MAX_LATITUDE), -MAX_LATITUDE);
+    // Clamp pitch to valid range
+    const clampedPitch = Math.max(DEFAULT_MIN_PITCH, Math.min(DEFAULT_MAX_PITCH, pitch));
 
     height = height || 1;
     if (fovy) {
@@ -110,10 +120,13 @@ export default class GlobeViewport extends Viewport {
     // Calculate view matrix
     // The view matrix rotates the globe to show the correct location and orientation
     // 1. Start with camera looking at origin from -Y axis (north up = +Z)
-    // 2. Rotate around Y axis by bearing (camera rotation around its view axis)
-    // 3. Rotate around X axis by latitude (tilt to show correct latitude)
-    // 4. Rotate around Z axis by -longitude (spin globe to show correct longitude)
+    // 2. Apply pitch rotation (tilt camera up/down from looking at center)
+    // 3. Rotate around Y axis by bearing (camera rotation around its view axis)
+    // 4. Rotate around X axis by latitude (tilt to show correct latitude)
+    // 5. Rotate around Z axis by -longitude (spin globe to show correct longitude)
     const viewMatrix = new Matrix4().lookAt({eye: [0, -altitude, 0], up: [0, 0, 1]});
+    // Apply pitch rotation (rotate camera around its local X axis to tilt view)
+    viewMatrix.rotateX(-clampedPitch * DEGREES_TO_RADIANS);
     // Apply bearing rotation (rotate camera around its view axis)
     viewMatrix.rotateY(bearing * DEGREES_TO_RADIANS);
     viewMatrix.rotateX(latitude * DEGREES_TO_RADIANS);
@@ -143,6 +156,7 @@ export default class GlobeViewport extends Viewport {
     this.latitude = latitude;
     this.longitude = longitude;
     this.bearing = bearing;
+    this.pitch = clampedPitch;
     this.fovy = fovy;
     this.resolution = resolution;
   }

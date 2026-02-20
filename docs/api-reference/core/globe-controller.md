@@ -37,10 +37,20 @@ new Deck({
 
 Supports all [Controller options](./controller.md#options) with the following default behavior:
 
-- `dragPan`: default `'pan'` (drag to pan)
-- `dragRotate`: default `true` (drag with function key to rotate/change bearing)
-- `touchRotate`: default `false` (two-finger rotate gesture to change bearing)
-- `keyboard`: arrow keys to pan, +/- to zoom, shift+left/right to rotate
+- `dragPan`: default `true` (drag to pan)
+- `dragRotate`: default `true` (drag with function key to rotate/change bearing and pitch)
+- `touchZoom`: default `true` (pinch to zoom, zooms toward cursor position)
+- `touchRotate`: default `false` (two-finger rotate gesture to change bearing and pitch)
+- `keyboard`: arrow keys to pan, +/- to zoom, shift+left/right to rotate bearing, shift+up/down to change pitch
+
+## Interactions
+
+The GlobeController supports Google Earth-like interactions:
+
+- **Pan**: Drag to rotate the globe (change longitude/latitude)
+- **Rotate**: Shift+drag (or right-click drag) to change bearing and pitch
+- **Zoom**: Scroll wheel or pinch gesture - zooms toward cursor position
+- **Keyboard**: Arrow keys for panning, +/- for zoom, Shift+arrows for rotation
 
 ## Custom GlobeController
 

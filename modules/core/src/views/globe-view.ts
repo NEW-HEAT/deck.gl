@@ -16,10 +16,16 @@ export type GlobeViewState = {
   zoom: number;
   /** Bearing angle in degrees (rotation around the view axis). Default `0` (north up). */
   bearing?: number;
+  /** Pitch angle in degrees (tilt of the camera). Default `0` (looking straight at globe center). Range: 0-85. */
+  pitch?: number;
   /** Min zoom, default `0` */
   minZoom?: number;
   /** Max zoom, default `20` */
   maxZoom?: number;
+  /** Min pitch in degrees. Default `0`. */
+  minPitch?: number;
+  /** Max pitch in degrees. Default `85`. */
+  maxPitch?: number;
   /** The near plane position */
   nearZ?: number;
   /** The far plane position */

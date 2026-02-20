@@ -229,3 +229,50 @@ test('GlobeViewport#bearing', t => {
 
   t.end();
 });
+
+test('GlobeViewport#pitch', t => {
+  // Test viewport with default pitch (0)
+  const viewport0 = new GlobeViewport({
+    width: 800,
+    height: 600,
+    latitude: 38,
+    longitude: -122,
+    zoom: 4
+  });
+  t.equal(viewport0.pitch, 0, 'Default pitch is 0');
+
+  // Test viewport with non-zero pitch
+  const viewport45 = new GlobeViewport({
+    width: 800,
+    height: 600,
+    latitude: 38,
+    longitude: -122,
+    zoom: 4,
+    pitch: 45
+  });
+  t.equal(viewport45.pitch, 45, 'Pitch is set correctly');
+
+  // Test pitch clamping - should clamp to max 85
+  const viewport90 = new GlobeViewport({
+    width: 800,
+    height: 600,
+    latitude: 38,
+    longitude: -122,
+    zoom: 4,
+    pitch: 90
+  });
+  t.equal(viewport90.pitch, 85, 'Pitch is clamped to 85');
+
+  // Test negative pitch clamping - should clamp to min 0
+  const viewportNeg = new GlobeViewport({
+    width: 800,
+    height: 600,
+    latitude: 38,
+    longitude: -122,
+    zoom: 4,
+    pitch: -10
+  });
+  t.equal(viewportNeg.pitch, 0, 'Negative pitch is clamped to 0');
+
+  t.end();
+});

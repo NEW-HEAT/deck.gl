@@ -20,8 +20,8 @@ It's recommended that you read the [Views and Projections guide](../../developer
 The goal of `GlobeView` is to provide a generic solution to rendering and navigating data in the 3D space.
 In the initial release, this class mainly addresses the need to render an overview of the entire globe. The following limitations apply, as features are still under development: 
 
-- No support for `pitch`. The camera always points towards the center of the earth.
 - `bearing` is supported for rotation around the view axis (like compass rotation).
+- `pitch` is supported to tilt the camera angle (0-85 degrees), similar to Google Earth.
 - No high-precision rendering at high zoom levels (> 12). Features at the city-block scale may not be rendered accurately.
 - Only supports `COORDINATE_SYSTEM.LNGLAT` (default of the `coordinateSystem` prop).
 - Known rendering issues when using multiple views mixing `GlobeView` and `MapView`, or switching between the two.
@@ -64,8 +64,11 @@ To render, `GlobeView` needs to be used together with a `viewState` with the fol
 - `latitude` (number) - latitude at the viewport center
 - `zoom` (number) - zoom level
 - `bearing` (number, optional) - bearing angle in degrees. Default `0` (north up). Positive values rotate clockwise.
+- `pitch` (number, optional) - pitch angle in degrees. Default `0` (looking straight at globe center). Range: 0-85.
 - `maxZoom` (number, optional) - max zoom level. Default `20`.
 - `minZoom` (number, optional) - min zoom level. Default `0`.
+- `minPitch` (number, optional) - min pitch in degrees. Default `0`.
+- `maxPitch` (number, optional) - max pitch in degrees. Default `85`.
 
 
 ## Controller
