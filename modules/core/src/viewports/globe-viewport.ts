@@ -261,18 +261,31 @@ export default class GlobeViewport extends Viewport {
   }
 
   /**
-   * Pan the globe using delta-based movement
-   * @param coords - the geographic coordinates where the pan started
-   * @param pixel - the current screen position
-   * @param startPixel - the screen position where the pan started
-   * @returns updated viewport options with new longitude/latitude
+   * Pan the globe so that a geographic position appears at a given screen pixel.
+   *
+   * Two modes:
+   * - **Anchor mode** (no `startPixel`): adjust center so `coords` appears at `pixel`.
+   *   Used by zoom-toward-cursor.
+   * - **Delta mode** (`startPixel` provided): pan by the screen-space delta between
+   *   `startPixel` and `pixel`. Used by drag-pan.
    */
-  panByPosition(
-    [startLng, startLat, startZoom]: number[],
-    pixel: number[],
-    startPixel: number[]
-  ): GlobeViewportOptions {
-    // Scale rotation speed inversely with zoom, to approximate constant panning speed
+  panByPosition(coords: number[], pixel: number[], startPixel?: number[]): GlobeViewportOptions {
+    if (!startPixel) {
+      // Anchor mode: adjust center so coords[lng,lat] lands at pixel
+      const currentAtPixel = this.unproject(pixel);
+      if (!currentAtPixel) {
+        return {longitude: this.longitude, latitude: this.latitude};
+      }
+      const longitude = this.longitude + (coords[0] - currentAtPixel[0]);
+      const latitude = Math.max(
+        Math.min(this.latitude + (coords[1] - currentAtPixel[1]), MAX_LATITUDE),
+        -MAX_LATITUDE
+      );
+      return {longitude, latitude};
+    }
+
+    // Delta mode: pan by screen-space delta
+    const [startLng, startLat, startZoom] = coords;
     const scale = Math.pow(2, this.zoom - zoomAdjust(this.latitude));
     const rotationSpeed = 0.25 / scale;
 
