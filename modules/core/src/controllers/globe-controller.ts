@@ -3,7 +3,7 @@
 // Copyright (c) vis.gl contributors
 
 import {clamp} from '@math.gl/core';
-import Controller, {ControllerProps} from './controller';
+import Controller from './controller';
 
 import {MapState, MapStateProps} from './map-controller';
 import type {MapStateInternal} from './map-controller';
@@ -86,7 +86,7 @@ class GlobeState extends MapState {
 
   applyConstraints(props: Required<MapStateProps>): Required<MapStateProps> {
     // Ensure zoom is within specified range
-    const {longitude, latitude, maxBounds} = props;
+    const {longitude, latitude, maxBounds, maxPitch, minPitch} = props;
 
     props.zoom = this._constrainZoom(props.zoom, props);
 
@@ -94,6 +94,15 @@ class GlobeState extends MapState {
       props.longitude = mod(longitude + 180, 360) - 180;
     }
     props.latitude = clamp(latitude, -MAX_LATITUDE, MAX_LATITUDE);
+
+    // Normalize bearing to [-180, 180]
+    if (props.bearing < -180 || props.bearing > 180) {
+      props.bearing = mod(props.bearing + 180, 360) - 180;
+    }
+
+    // Clamp pitch to [minPitch, maxPitch]
+    props.pitch = clamp(props.pitch, minPitch, maxPitch);
+
     if (maxBounds) {
       props.longitude = clamp(props.longitude, maxBounds[0][0], maxBounds[1][0]);
       props.latitude = clamp(props.latitude, maxBounds[0][1], maxBounds[1][1]);
@@ -175,16 +184,14 @@ export default class GlobeController extends Controller<MapState> {
 
   transition = {
     transitionDuration: 300,
-    transitionInterpolator: new LinearInterpolator(['longitude', 'latitude', 'zoom'])
+    transitionInterpolator: new LinearInterpolator([
+      'longitude',
+      'latitude',
+      'zoom',
+      'bearing',
+      'pitch'
+    ])
   };
 
   dragMode: 'pan' | 'rotate' = 'pan';
-
-  setProps(props: ControllerProps) {
-    super.setProps(props);
-
-    // TODO - support pitching?
-    this.dragRotate = false;
-    this.touchRotate = false;
-  }
 }

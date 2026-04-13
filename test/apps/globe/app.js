@@ -3,7 +3,14 @@
 // Copyright (c) vis.gl contributors
 
 import {Deck, _GlobeView as GlobeView} from '@deck.gl/core';
-import {GeoJsonLayer, ArcLayer, ColumnLayer, BitmapLayer, PathLayer} from '@deck.gl/layers';
+import {
+  GeoJsonLayer,
+  ArcLayer,
+  ColumnLayer,
+  BitmapLayer,
+  PathLayer,
+  SolidPolygonLayer
+} from '@deck.gl/layers';
 
 // source: Natural Earth http://www.naturalearthdata.com/ via geojson.xyz
 const COUNTRIES =
@@ -16,7 +23,9 @@ const WORLD_MAP = './map.jpg';
 const INITIAL_VIEW_STATE = {
   latitude: 51.47,
   longitude: 0.45,
-  zoom: 0
+  zoom: 0,
+  pitch: 30,
+  bearing: 0
 };
 
 const GRATICULES = getGraticules(30);
@@ -29,6 +38,23 @@ export const deck = new Deck({
     cull: true
   },
   layers: [
+    new SolidPolygonLayer({
+      id: 'earth-surface',
+      data: [
+        [
+          [-180, 90],
+          [0, 90],
+          [180, 90],
+          [180, -90],
+          [0, -90],
+          [-180, -90]
+        ]
+      ],
+      getPolygon: d => d,
+      stroked: false,
+      filled: true,
+      getFillColor: [20, 20, 40]
+    }),
     new BitmapLayer({
       id: 'base-map-raster',
       image: WORLD_MAP,
