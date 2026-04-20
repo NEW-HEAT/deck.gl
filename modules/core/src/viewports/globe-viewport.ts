@@ -112,10 +112,18 @@ export default class GlobeViewport extends Viewport {
     // Adjust far plane for pitch — tilted camera can see further across the globe
     const pitchRadians = pitch * DEGREES_TO_RADIANS;
     const nearZ = opts.nearZ ?? nearZMultiplier;
+    // Far plane = distance from camera to horizon (beyond that, earth's
+    // curvature occludes everything). Using the full globe-diameter formula
+    // would push far past anything drawable and wreck depth-buffer precision
+    // at close zoom, causing z-fighting on 3D features like Tile3DLayer
+    // meshes. Multiply by 2 to keep headroom for tall features (mountains,
+    // buildings) peeking above the horizon. Divide by cos(pitch) so tilted
+    // cameras can still see the horizon.
+    const globeRadiusView = (GLOBE_RADIUS * scale) / height;
+    const horizonDistance = Math.sqrt(altitude * altitude + 2 * altitude * globeRadiusView);
     const farZ =
       opts.farZ ??
-      (altitude + (GLOBE_RADIUS * 2 * scale) / height / Math.max(Math.cos(pitchRadians), 0.1)) *
-        farZMultiplier;
+      ((horizonDistance * 2) / Math.max(Math.cos(pitchRadians), 0.1)) * farZMultiplier;
 
     // Calculate view matrix
     // The Viewport base class subtracts `center` (the target's common-space position)
