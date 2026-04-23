@@ -363,6 +363,8 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     } = this.props;
 
     if (this.state.isTiled) {
+      const projectionMode = this.context.viewport.projectionMode;
+
       return new TileLayer<MeshAndTexture>(
         this.getSubLayerProps({
           id: 'tiles'
