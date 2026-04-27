@@ -7,6 +7,7 @@ import {createRoot} from 'react-dom/client';
 import {DeckGL} from '@deck.gl/react';
 
 import {TerrainLayer, TerrainLayerProps} from '@deck.gl/geo-layers';
+import {_GlobeView as GlobeView} from '@deck.gl/core';
 import type {MapViewState} from '@deck.gl/core';
 
 // Set your mapbox token here
@@ -15,7 +16,7 @@ const MAPBOX_TOKEN = process.env.MapboxAccessToken; // eslint-disable-line
 const INITIAL_VIEW_STATE: MapViewState = {
   latitude: 46.24,
   longitude: -122.18,
-  zoom: 11.5,
+  zoom: 12.5,
   bearing: 140,
   pitch: 60,
   maxPitch: 89
@@ -57,8 +58,10 @@ export default function App({
 
   return (
     <DeckGL
+      views={new GlobeView()}
       initialViewState={initialViewState}
       controller={true}
+      parameters={{cull: true}}
       layers={[layer]}
       getTooltip={info => {
         if (info.picked && info.coordinate && info.coordinate.length === 3) {

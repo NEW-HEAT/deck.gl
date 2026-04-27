@@ -237,12 +237,19 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
 
     const [mesh, texture] = data;
 
+    const {viewport} = this.context;
+    // Bounds are baked with projectFlat. In GlobeView projectFlat is identity,
+    // so tiled terrain meshes are in lng/lat degrees instead of common-space
+    // web-mercator units.
+    const isGlobe = Boolean(viewport.resolution && viewport.resolution > 0);
+    const coordinateSystem = isGlobe ? COORDINATE_SYSTEM.LNGLAT : COORDINATE_SYSTEM.CARTESIAN;
+
     return new SubLayerClass(props, {
       data: DUMMY_DATA,
       mesh,
       texture,
       _instanced: false,
-      coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+      coordinateSystem,
       getPosition: d => [0, 0, 0],
       getColor: color,
       wireframe,
@@ -311,7 +318,8 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
               elevationData: urlTemplateToUpdateTrigger(elevationData),
               texture: urlTemplateToUpdateTrigger(texture),
               meshMaxError,
-              elevationDecoder
+              elevationDecoder,
+              projectionMode: this.context.viewport.projectionMode
             }
           },
           onViewportLoad: this.onViewportLoad.bind(this),
