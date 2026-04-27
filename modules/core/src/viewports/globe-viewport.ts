@@ -191,10 +191,19 @@ export default class GlobeViewport extends Viewport {
     ];
   }
 
+  unproject(xyz: number[], options?: {topLeft?: boolean; targetZ?: number}): number[];
   unproject(
     xyz: number[],
-    {topLeft = true, targetZ}: {topLeft?: boolean; targetZ?: number} = {}
-  ): number[] {
+    options: {topLeft?: boolean; targetZ?: number; fallback: false}
+  ): number[] | null;
+  unproject(
+    xyz: number[],
+    {
+      topLeft = true,
+      targetZ,
+      fallback = true
+    }: {topLeft?: boolean; targetZ?: number; fallback?: boolean} = {}
+  ): number[] | null {
     const [x, y, z] = xyz;
 
     const y2 = topLeft ? y : this.height - y;
@@ -207,23 +216,21 @@ export default class GlobeViewport extends Viewport {
     } else {
       // since we don't know the correct projected z value for the point,
       // unproject two points to get a line and then find the point on that line that intersects with the sphere
-      const coord0 = transformVector(pixelUnprojectionMatrix, [x, y2, -1, 1]);
-      const coord1 = transformVector(pixelUnprojectionMatrix, [x, y2, 1, 1]);
-
-      const lt = ((targetZ || 0) / EARTH_RADIUS + 1) * GLOBE_RADIUS;
-      const lSqr = vec3.sqrLen(vec3.sub([], coord0, coord1));
-      const l0Sqr = vec3.sqrLen(coord0);
-      const l1Sqr = vec3.sqrLen(coord1);
-      const sSqr = (4 * l0Sqr * l1Sqr - (lSqr - l0Sqr - l1Sqr) ** 2) / 16;
-      const dSqr = (4 * sSqr) / lSqr;
-      const r0 = Math.sqrt(l0Sqr - dSqr);
-      const discriminant = lt * lt - dSqr;
+      const {coord0, coord1, lSqr, r0, discriminant} = this._getRaySphereIntersection(
+        x,
+        y2,
+        targetZ
+      );
 
       if (discriminant < 0) {
+        if (!fallback) {
+          return null;
+        }
         // Ray misses the sphere — project the closest-approach point onto the sphere surface
         const tClosest = r0 / Math.sqrt(lSqr);
         const closest = vec3.lerp([], coord0, coord1, tClosest);
         const len = vec3.len(closest);
+        const lt = ((targetZ || 0) / EARTH_RADIUS + 1) * GLOBE_RADIUS;
         coord = len > 0 ? vec3.scale([], closest, lt / len) : [0, 0, lt];
       } else {
         const dr = Math.sqrt(discriminant);
@@ -237,6 +244,15 @@ export default class GlobeViewport extends Viewport {
       return [X, Y, Z];
     }
     return Number.isFinite(targetZ) ? [X, Y, targetZ as number] : [X, Y];
+  }
+
+  isPointOnGlobe(
+    pixel: number[],
+    {topLeft = true, targetZ}: {topLeft?: boolean; targetZ?: number} = {}
+  ): boolean {
+    const [x, y] = pixel;
+    const y2 = topLeft ? y : this.height - y;
+    return this._getRaySphereIntersection(x, y2, targetZ).discriminant >= 0;
   }
 
   projectPosition(xyz: number[]): [number, number, number] {
@@ -270,48 +286,65 @@ export default class GlobeViewport extends Viewport {
   }
 
   /**
-   * Pan the globe so that a geographic position appears at a given screen pixel.
-   *
-   * Two modes:
-   * - **Anchor mode** (no `startPixel`): adjust center so `coords` appears at `pixel`.
-   *   Used by zoom-toward-cursor.
-   * - **Delta mode** (`startPixel` provided): pan by the screen-space delta between
-   *   `startPixel` and `pixel`. Used by drag-pan.
+   * Pan the globe using delta-based movement.
+   * Used when the pointer starts outside the globe so dragging spins the globe.
    */
   panByPosition(coords: number[], pixel: number[], startPixel?: number[]): GlobeViewportOptions {
     if (!startPixel) {
-      // Anchor mode: adjust center so coords[lng,lat] lands at pixel
-      const currentAtPixel = this.unproject(pixel);
-      if (!currentAtPixel) {
-        return {longitude: this.longitude, latitude: this.latitude};
-      }
-      const longitude = this.longitude + (coords[0] - currentAtPixel[0]);
-      const latitude = Math.max(
-        Math.min(this.latitude + (coords[1] - currentAtPixel[1]), MAX_LATITUDE),
-        -MAX_LATITUDE
-      );
-      return {longitude, latitude};
+      return this.panByLngLat(coords, pixel);
     }
 
-    // Delta mode: pan by screen-space delta
     const [startLng, startLat, startZoom] = coords;
+    // Scale rotation speed inversely with zoom to keep off-globe drags predictable.
     const scale = Math.pow(2, this.zoom - zoomAdjust(this.latitude));
     const rotationSpeed = 0.25 / scale;
 
     const dx = startPixel[0] - pixel[0];
     const dy = startPixel[1] - pixel[1];
-
-    // Rotate screen-space delta by bearing to get geo-space delta
     const bearingRad = this.bearing * DEGREES_TO_RADIANS;
     const cosB = Math.cos(bearingRad);
     const sinB = Math.sin(bearingRad);
 
     const longitude = startLng + rotationSpeed * (dx * cosB - dy * sinB);
-    let latitude = startLat - rotationSpeed * (dx * sinB + dy * cosB);
-    latitude = Math.max(Math.min(latitude, MAX_LATITUDE), -MAX_LATITUDE);
-    const out = {longitude, latitude, zoom: startZoom - zoomAdjust(startLat)};
-    out.zoom += zoomAdjust(out.latitude);
-    return out;
+    const latitude = Math.max(
+      Math.min(startLat - rotationSpeed * (dx * sinB + dy * cosB), MAX_LATITUDE),
+      -MAX_LATITUDE
+    );
+    const zoom = startZoom + zoomAdjust(latitude) - zoomAdjust(startLat);
+    return {longitude, latitude, zoom};
+  }
+
+  /**
+   * Pan the globe so that a geographic position appears at a given screen pixel.
+   * Used for on-globe drag-pan and zoom-toward-cursor.
+   */
+  panByLngLat(coords: number[], pixel: number[]): GlobeViewportOptions {
+    const currentAtPixel = this.unproject(pixel, {fallback: false});
+    if (!currentAtPixel) {
+      return {longitude: this.longitude, latitude: this.latitude};
+    }
+    const longitude = this.longitude + (coords[0] - currentAtPixel[0]);
+    const latitude = Math.max(
+      Math.min(this.latitude + (coords[1] - currentAtPixel[1]), MAX_LATITUDE),
+      -MAX_LATITUDE
+    );
+    // Adjust zoom for latitude change to maintain consistent visual scale
+    const zoom = this.zoom + zoomAdjust(latitude) - zoomAdjust(this.latitude);
+    return {longitude, latitude, zoom};
+  }
+
+  private _getRaySphereIntersection(x: number, y: number, targetZ?: number) {
+    const coord0 = transformVector(this.pixelUnprojectionMatrix, [x, y, -1, 1]);
+    const coord1 = transformVector(this.pixelUnprojectionMatrix, [x, y, 1, 1]);
+    const lt = ((targetZ || 0) / EARTH_RADIUS + 1) * GLOBE_RADIUS;
+    const lSqr = vec3.sqrLen(vec3.sub([], coord0, coord1));
+    const l0Sqr = vec3.sqrLen(coord0);
+    const l1Sqr = vec3.sqrLen(coord1);
+    const sSqr = (4 * l0Sqr * l1Sqr - (lSqr - l0Sqr - l1Sqr) ** 2) / 16;
+    const dSqr = (4 * sSqr) / lSqr;
+    const r0 = Math.sqrt(l0Sqr - dSqr);
+
+    return {coord0, coord1, lSqr, r0, discriminant: lt * lt - dSqr};
   }
 }
 
