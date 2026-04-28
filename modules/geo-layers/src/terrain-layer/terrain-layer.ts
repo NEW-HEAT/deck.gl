@@ -29,6 +29,10 @@ import type {
 import {Tile2DHeader, urlType, getURLFromTemplate, URLTemplate} from '../tileset-2d/index';
 
 const DUMMY_DATA = [1];
+const TILE_OVERLAP_PIXELS = 1;
+const MIN_TERRAIN_MESH_MAX_ERROR = 1;
+const MAX_LATITUDE = 90;
+const MAX_LONGITUDE = 180;
 
 const defaultProps: DefaultProps<TerrainLayerProps> = {
   ...TileLayer.defaultProps,
@@ -67,6 +71,35 @@ function urlTemplateToUpdateTrigger(template: URLTemplate): string {
     return template.join(';');
   }
   return template || '';
+}
+
+function getOverlappedBounds(bounds: Bounds, tileSize: number, clampLngLat: boolean): Bounds {
+  const xPad = ((bounds[2] - bounds[0]) / tileSize) * TILE_OVERLAP_PIXELS;
+  const yPad = ((bounds[3] - bounds[1]) / tileSize) * TILE_OVERLAP_PIXELS;
+  const overlappedBounds: Bounds = [
+    bounds[0] - xPad,
+    bounds[1] - yPad,
+    bounds[2] + xPad,
+    bounds[3] + yPad
+  ];
+
+  if (!clampLngLat) {
+    return overlappedBounds;
+  }
+
+  return [
+    Math.max(overlappedBounds[0], -MAX_LONGITUDE),
+    Math.max(overlappedBounds[1], -MAX_LATITUDE),
+    Math.min(overlappedBounds[2], MAX_LONGITUDE),
+    Math.min(overlappedBounds[3], MAX_LATITUDE)
+  ];
+}
+
+function getEffectiveMeshMaxError(meshMaxError: number): number {
+  if (!Number.isFinite(meshMaxError) || meshMaxError <= 0) {
+    return MIN_TERRAIN_MESH_MAX_ERROR;
+  }
+  return Math.max(meshMaxError, MIN_TERRAIN_MESH_MAX_ERROR);
 }
 
 type ElevationDecoder = {rScaler: number; gScaler: number; bScaler: number; offset: number};
@@ -169,14 +202,15 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     if (!elevationData) {
       return null;
     }
+    const effectiveMeshMaxError = getEffectiveMeshMaxError(meshMaxError);
     let loadOptions = this.getLoadOptions();
     loadOptions = {
       ...loadOptions,
       terrain: {
-        skirtHeight: this.state.isTiled ? meshMaxError * 2 : 0,
+        skirtHeight: this.state.isTiled ? effectiveMeshMaxError * 2 : 0,
         ...loadOptions?.terrain,
         bounds,
-        meshMaxError,
+        meshMaxError: effectiveMeshMaxError,
         elevationDecoder
       }
     };
@@ -202,7 +236,14 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
       bottomLeft = [bbox.left, bbox.bottom];
       topRight = [bbox.right, bbox.top];
     }
-    const bounds: Bounds = [bottomLeft[0], bottomLeft[1], topRight[0], topRight[1]];
+    // Raster terrain tiles do not carry neighbor edge samples. Adjacent meshes can
+    // therefore disagree vertically at the shared boundary; a tiny horizontal
+    // overlap hides the crack without exposing visible skirts.
+    const bounds = getOverlappedBounds(
+      [bottomLeft[0], bottomLeft[1], topRight[0], topRight[1]],
+      this.props.tileSize,
+      Boolean(viewport.resolution && viewport.resolution > 0)
+    );
 
     const terrain = this.loadTerrain({
       elevationData: dataUrl,
