@@ -13,6 +13,50 @@ import {HeightMapBuilder} from './height-map-builder';
 
 import type {Effect, EffectContext, PreRenderOptions, Layer, Viewport} from '@deck.gl/core';
 
+let lastTerrainEffectDebugAt = 0;
+let lastTerrainEffectDebugKey = '';
+
+function isTerrainEffectDebugEnabled(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  const win = window as unknown as {
+    __NH_TERRAIN_DEBUG__?: boolean;
+    localStorage?: Storage;
+  };
+  if (win.__NH_TERRAIN_DEBUG__ === false) {
+    return false;
+  }
+  if (win.__NH_TERRAIN_DEBUG__ === true) {
+    return true;
+  }
+  try {
+    return win.localStorage?.getItem('NH_TERRAIN_DEBUG_VERBOSE') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function summarizeEffectLayer(layer: Layer) {
+  const props = layer.props as Record<string, any>;
+  const extensions = Array.isArray(props.extensions)
+    ? props.extensions.map(ext => ext?.constructor?.extensionName ?? ext?.constructor?.name ?? 'unknown')
+    : [];
+  const data = props.data;
+  return {
+    id: layer.id,
+    type: (layer.constructor as any).layerName ?? layer.constructor.name,
+    visible: props.visible,
+    operation: props.operation,
+    terrainDrawMode: props.terrainDrawMode,
+    stateTerrainDrawMode: layer.state.terrainDrawMode,
+    extensions: extensions.join(','),
+    data: Array.isArray(data) ? `array:${data.length}` : typeof data,
+    currentTime: props.currentTime,
+    trailLength: props.trailLength
+  };
+}
+
 /** Class to manage terrain effect */
 export class TerrainEffect implements Effect {
   id = 'terrain-effect';
@@ -71,18 +115,25 @@ export class TerrainEffect implements Effect {
     );
 
     const terrainLayers = layers.filter(l => l.props.operation.includes('terrain'));
+    const offsetLayers = !isPicking ? layers.filter(l => l.state.terrainDrawMode === 'offset') : [];
+    const drapeLayers = layers.filter(l => l.state.terrainDrawMode === 'drape');
+    this._debugRenderableLayers({
+      pass: opts.pass,
+      viewport,
+      layers,
+      terrainLayers,
+      offsetLayers,
+      drapeLayers
+    });
     if (terrainLayers.length === 0) {
       return;
     }
-
     if (!isPicking) {
-      const offsetLayers = layers.filter(l => l.state.terrainDrawMode === 'offset');
       if (offsetLayers.length > 0) {
         this._updateHeightMap(terrainLayers, viewport, opts);
       }
     }
 
-    const drapeLayers = layers.filter(l => l.state.terrainDrawMode === 'drape');
     this._updateTerrainCovers(terrainLayers, drapeLayers, viewport, opts);
   }
 
@@ -156,6 +207,52 @@ export class TerrainEffect implements Effect {
         }
       }
     });
+  }
+
+  private _debugRenderableLayers({
+    pass,
+    viewport,
+    layers,
+    terrainLayers,
+    offsetLayers,
+    drapeLayers
+  }: {
+    pass: string;
+    viewport: Viewport;
+    layers: Layer[];
+    terrainLayers: Layer[];
+    offsetLayers: Layer[];
+    drapeLayers: Layer[];
+  }) {
+    if (!isTerrainEffectDebugEnabled()) {
+      return;
+    }
+    const summary = {
+      pass,
+      viewport: {
+        type: viewport.constructor.name,
+        projectionMode: (viewport as any).projectionMode,
+        resolution: (viewport as any).resolution,
+        zoom: viewport.zoom
+      },
+      renderable: layers.map(summarizeEffectLayer),
+      terrainLayerIds: terrainLayers.map(layer => layer.id),
+      offsetLayerIds: offsetLayers.map(layer => layer.id),
+      drapeLayerIds: drapeLayers.map(layer => layer.id),
+      terrainCoverIds: [...this.terrainCovers.keys()]
+    };
+    const key = JSON.stringify(summary);
+    const now = Date.now();
+    if (now - lastTerrainEffectDebugAt < 1000) {
+      return;
+    }
+    lastTerrainEffectDebugKey = key;
+    lastTerrainEffectDebugAt = now;
+    console.log(`[terrain-debug] deck TerrainEffect ${JSON.stringify(summary)}`);
+    console.groupCollapsed('[terrain-debug] deck TerrainEffect');
+    console.log(summary);
+    console.table(summary.renderable);
+    console.groupEnd();
   }
 
   private _updateTerrainCovers(

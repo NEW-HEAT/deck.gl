@@ -5,7 +5,7 @@
 /* eslint-disable camelcase */
 
 import type {ShaderModule} from '@luma.gl/shadertools';
-import {project, ProjectProps, ProjectUniforms} from '@deck.gl/core';
+import {project, ProjectProps} from '@deck.gl/core';
 
 import type {Texture} from '@luma.gl/core';
 import type {Bounds} from '../utils/projection-utils';
@@ -67,10 +67,25 @@ uniform sampler2D terrain_map;
 export const terrainModule = {
   name: 'terrain',
   dependencies: [project],
-  // eslint-disable-next-line prefer-template
-  vs: uniformBlock + /* glsl */ 'out vec3 commonPos;',
-  // eslint-disable-next-line prefer-template
-  fs: uniformBlock + /* glsl */ 'in vec3 commonPos;',
+  vs: `${uniformBlock}
+out vec3 commonPos;
+// Texture position in ABSOLUTE Mercator common space, regardless of the live
+// viewport projection. Terrain cover FBOs are still rendered by a
+// WebMercatorViewport, so this matches the offscreen render target rather than
+// choosing a display projection.
+out vec2 terrainMercPos;
+
+vec2 terrain_globe_to_mercator(vec3 commonPosition) {
+  float D = length(commonPosition);
+  float sinLat = clamp(commonPosition.z / D, -0.999998, 0.999998);
+  float lng = atan(commonPosition.x, -commonPosition.y);
+  return vec2(
+    lng + PI,
+    PI + 0.5 * log((1.0 + sinLat) / (1.0 - sinLat))
+  ) * WORLD_SCALE;
+}
+`,
+  fs: `${uniformBlock}in vec3 commonPos;\nin vec2 terrainMercPos;`,
   inject: {
     'vs:#main-start': /* glsl */ `
 if (terrain.mode == TERRAIN_MODE_SKIP) {
@@ -80,16 +95,29 @@ if (terrain.mode == TERRAIN_MODE_SKIP) {
 `,
     'vs:DECKGL_FILTER_GL_POSITION': /* glsl */ `
 commonPos = geometry.position.xyz;
+if (project.projectionMode == PROJECTION_MODE_GLOBE) {
+  // Convert globe cartesian (see project_globe_) directly to Mercator world
+  // coordinates. This is equivalent to project_mercator_(lngLat), but avoids
+  // degree conversion and a second trig round trip.
+  terrainMercPos = terrain_globe_to_mercator(commonPos);
+} else {
+  // Web Mercator modes: commonPos.xy is mercator-common minus commonOrigin.
+  terrainMercPos = commonPos.xy + project.commonOrigin.xy;
+}
 if (terrain.mode == TERRAIN_MODE_WRITE_HEIGHT_MAP) {
-  vec2 texCoords = (commonPos.xy - terrain.bounds.xy) / terrain.bounds.zw;
+  // Height-map bounds are in ABSOLUTE Mercator common (so the FBO is reusable
+  // across MapView / GlobeView). Use the mercator xy computed above.
+  vec2 texCoords = (terrainMercPos - terrain.bounds.xy) / terrain.bounds.zw;
   position = vec4(texCoords * 2.0 - 1.0, 0.0, 1.0);
   commonPos.z += project.commonOrigin.z;
 }
 if (terrain.mode == TERRAIN_MODE_USE_HEIGHT_MAP) {
-  vec3 anchor = geometry.worldPosition;
-  anchor.z = 0.0;
-  vec3 anchorCommon = project_position(anchor);
-  vec2 texCoords = (anchorCommon.xy - terrain.bounds.xy) / terrain.bounds.zw;
+  // worldPosition.xy is lng/lat for geospatial instance-position layers
+  // (IconLayer, TextLayer, etc.) - project directly through mercator so the
+  // UV matches the absolute-mercator bounds used by WRITE_HEIGHT_MAP, on
+  // both MapView and GlobeView.
+  vec2 anchorMerc = project_mercator_(geometry.worldPosition.xy);
+  vec2 texCoords = (anchorMerc - terrain.bounds.xy) / terrain.bounds.zw;
   if (texCoords.x >= 0.0 && texCoords.y >= 0.0 && texCoords.x <= 1.0 && texCoords.y <= 1.0) {
     float terrainZ = texture(terrain_map, texCoords).r;
     geometry.position.z += terrainZ;
@@ -105,7 +133,7 @@ if (terrain.mode == TERRAIN_MODE_WRITE_HEIGHT_MAP) {
     `,
     'fs:DECKGL_FILTER_COLOR': /* glsl */ `
 if ((terrain.mode == TERRAIN_MODE_USE_COVER) || (terrain.mode == TERRAIN_MODE_USE_COVER_ONLY)) {
-  vec2 texCoords = (commonPos.xy - terrain.bounds.xy) / terrain.bounds.zw;
+  vec2 texCoords = (terrainMercPos - terrain.bounds.xy) / terrain.bounds.zw;
   vec4 pixel = texture(terrain_map, texCoords);
   if (terrain.mode == TERRAIN_MODE_USE_COVER_ONLY) {
     color = pixel;
@@ -129,8 +157,9 @@ if ((terrain.mode == TERRAIN_MODE_USE_COVER) || (terrain.mode == TERRAIN_MODE_US
         useTerrainHeightMap,
         terrainSkipRender
       } = opts;
-      const projectUniforms = project.getUniforms(opts.project) as ProjectUniforms;
-      const {commonOrigin} = projectUniforms;
+      // All modes now pack bounds in absolute Mercator common; shader samples
+      // against absolute xy computed per-fragment, so we no longer need the
+      // project module's commonOrigin here.
 
       let mode: number = terrainSkipRender ? TERRAIN_MODE.SKIP : TERRAIN_MODE.NONE;
       // height map if case USE_HEIGHT_MAP, terrain cover if USE_COVER, otherwise empty
@@ -165,18 +194,16 @@ if ((terrain.mode == TERRAIN_MODE_USE_COVER) || (terrain.mode == TERRAIN_MODE_US
         }
       }
 
+      // All bounds live in ABSOLUTE Mercator common space so the FBOs can be
+      // shared across MapView and GlobeView (see terrain-cover.ts and
+      // height-map-builder.ts). No commonOrigin subtract.
       /* eslint-disable camelcase */
       return {
         mode,
         terrain_map: sampler,
-        // Convert bounds to the common space, as [minX, minY, width, height]
+        // Pack bounds as [minX, minY, width, height]
         bounds: bounds
-          ? [
-              bounds[0] - commonOrigin[0],
-              bounds[1] - commonOrigin[1],
-              bounds[2] - bounds[0],
-              bounds[3] - bounds[1]
-            ]
+          ? [bounds[0], bounds[1], bounds[2] - bounds[0], bounds[3] - bounds[1]]
           : [0, 0, 0, 0]
       };
     }
