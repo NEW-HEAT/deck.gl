@@ -92,7 +92,7 @@ test('TerrainLayer#separate elevation and texture zooms', async () => {
   ]);
 });
 
-test('TerrainLayer#limits stitched texture tile fanout', async () => {
+test('TerrainLayer#stitches texture tiles up to textureMaxZoom', async () => {
   const urls: string[] = [];
   const layer = new TerrainLayer({
     id: 'terrain',
@@ -124,8 +124,8 @@ test('TerrainLayer#limits stitched texture tile fanout', async () => {
   });
 
   expect(urls[0], 'loads elevation at mesh zoom').toBe('terrain/13/1/2.png');
-  expect(urls.slice(1), 'limits texture stitching to 4x4 children').toHaveLength(16);
-  expect(urls[1], 'texture child zoom is capped relative to mesh zoom').toBe('texture/15/4/8.png');
+  expect(urls.slice(1), 'loads texture children through textureMaxZoom').toHaveLength(65536);
+  expect(urls[1], 'first texture child reaches textureMaxZoom').toBe('texture/21/256/512.png');
 });
 
 test('TerrainLayer#globe remaps WebMercator tile rows to lng/lat mesh positions', async () => {

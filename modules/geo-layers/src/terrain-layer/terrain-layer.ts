@@ -35,8 +35,6 @@ const MAX_LATITUDE = 90;
 const MAX_LONGITUDE = 180;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const RADIANS_TO_DEGREES = 180 / Math.PI;
-const MAX_STITCHED_TEXTURE_TILE_SCALE = 4;
-
 const defaultProps: DefaultProps<TerrainLayerProps> = {
   ...TileLayer.defaultProps,
   // Image url that encodes height data
@@ -331,8 +329,7 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     }
 
     const viewportZoom = Math.floor(this.context.viewport.zoom);
-    const highestStitchableZoom = meshZoom + Math.log2(MAX_STITCHED_TEXTURE_TILE_SCALE);
-    return Math.max(meshZoom, Math.min(textureZoom as number, viewportZoom, highestStitchableZoom));
+    return Math.max(meshZoom, Math.min(textureZoom as number, viewportZoom));
   }
 
   private fetchTextureTile(
