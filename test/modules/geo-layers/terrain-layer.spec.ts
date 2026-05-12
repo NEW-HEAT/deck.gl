@@ -56,7 +56,7 @@ test('TerrainLayer#separate elevation and texture zooms', async () => {
     elevationData: 'terrain/{z}/{x}/{y}.png',
     texture: 'texture/{z}/{x}/{y}.png',
     maxZoom: 12,
-    elevationMaxZoom: 11,
+    meshMaxZoom: 11,
     fetch: url => {
       urls.push(url);
       return Promise.resolve(null);
@@ -74,7 +74,7 @@ test('TerrainLayer#separate elevation and texture zooms', async () => {
 
   layer.state = {isTiled: true};
   const tileLayer = layer.renderLayers() as TileLayer;
-  expect(tileLayer.props.maxZoom, 'TileLayer maxZoom uses elevationMaxZoom').toBe(11);
+  expect(tileLayer.props.maxZoom, 'TileLayer maxZoom uses meshMaxZoom').toBe(11);
 
   await layer.getTiledTerrainData({
     index: {x: 1, y: 2, z: 11},
@@ -98,7 +98,7 @@ test('TerrainLayer#limits stitched texture tile fanout', async () => {
     id: 'terrain',
     elevationData: 'terrain/{z}/{x}/{y}.png',
     texture: 'texture/{z}/{x}/{y}.png',
-    elevationMaxZoom: 13,
+    meshMaxZoom: 13,
     textureMaxZoom: 21,
     fetch: url => {
       urls.push(url);

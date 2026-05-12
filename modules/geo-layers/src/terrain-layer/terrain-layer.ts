@@ -35,7 +35,7 @@ const MAX_LATITUDE = 90;
 const MAX_LONGITUDE = 180;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const RADIANS_TO_DEGREES = 180 / Math.PI;
-const MAX_STITCHED_TEXTURE_ZOOM_DELTA = 2;
+const MAX_STITCHED_TEXTURE_TILE_SCALE = 4;
 
 const defaultProps: DefaultProps<TerrainLayerProps> = {
   ...TileLayer.defaultProps,
@@ -49,9 +49,7 @@ const defaultProps: DefaultProps<TerrainLayerProps> = {
   bounds: {type: 'array', value: null, optional: true, compare: true},
   // Color to use if texture is unavailable
   color: {type: 'color', value: [255, 255, 255]},
-  // Object to decode height data, from (r, g, b) to height in meters.
-  // compare:true so consumers that pass fresh decoder refs with identical
-  // values don't force a tile reload.
+  // Object to decode height data, from (r, g, b) to height in meters
   elevationDecoder: {
     type: 'object',
     value: {
@@ -59,15 +57,14 @@ const defaultProps: DefaultProps<TerrainLayerProps> = {
       gScaler: 0,
       bScaler: 0,
       offset: 0
-    },
-    compare: true
+    }
   },
   // Supply url to local terrain worker bundle. Only required if running offline and cannot access CDN.
   workerUrl: '',
   // Same as SimpleMeshLayer wireframe
   wireframe: false,
   material: true,
-  elevationMaxZoom: 21,
+  meshMaxZoom: 21,
   textureMaxZoom: null,
 
   loaders: [TerrainWorkerLoader]
@@ -79,13 +76,6 @@ function urlTemplateToUpdateTrigger(template: URLTemplate): string {
     return template.join(';');
   }
   return template || '';
-}
-
-// updateTriggers diff with shallow equality. Collapse the decoder to a
-// value-identity string so callers passing a fresh object each render with
-// identical values don't invalidate every tile.
-function elevationDecoderToUpdateTrigger(decoder: ElevationDecoder): string {
-  return `${decoder.rScaler}|${decoder.gScaler}|${decoder.bScaler}|${decoder.offset}`;
 }
 
 function getOverlappedBounds(bounds: Bounds, tileSize: number, clampLngLat: boolean): Bounds {
@@ -152,7 +142,7 @@ type _TerrainLayerProps = {
    * Maximum zoom level of the elevation data used to create the terrain mesh.
    * If unset, `maxZoom` is used.
    */
-  elevationMaxZoom?: number | null;
+  meshMaxZoom?: number | null;
 
   /**
    * Maximum zoom level of the imagery used as the terrain texture.
@@ -258,7 +248,6 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     const dataUrl = getURLFromTemplate(elevationData, tile);
 
     const {signal} = tile;
-
     let bottomLeft = [0, 0] as [number, number];
     let topRight = [0, 0] as [number, number];
     if (viewport.isGeospatial) {
@@ -310,8 +299,8 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
       return this.fetchTextureTile(texture, tile, signal);
     }
 
-    const zoomDelta = textureZoom - tile.index.z;
-    const scale = 2 ** zoomDelta;
+    const childZoomLevels = textureZoom - tile.index.z;
+    const scale = 2 ** childZoomLevels;
     const textureTiles: Promise<TextureSource | null>[] = [];
 
     for (let y = 0; y < scale; y++) {
@@ -342,10 +331,8 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     }
 
     const viewportZoom = Math.floor(this.context.viewport.zoom);
-    return Math.max(
-      meshZoom,
-      Math.min(textureZoom as number, viewportZoom, meshZoom + MAX_STITCHED_TEXTURE_ZOOM_DELTA)
-    );
+    const highestStitchableZoom = meshZoom + Math.log2(MAX_STITCHED_TEXTURE_TILE_SCALE);
+    return Math.max(meshZoom, Math.min(textureZoom as number, viewportZoom, highestStitchableZoom));
   }
 
   private fetchTextureTile(
@@ -445,7 +432,7 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
       tileSize,
       maxZoom,
       minZoom,
-      elevationMaxZoom,
+      meshMaxZoom,
       extent,
       maxRequests,
       onTileLoad,
@@ -457,7 +444,6 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     } = this.props;
 
     if (this.state.isTiled) {
-      const projectionMode = this.context.viewport.projectionMode;
       return new TileLayer<MeshAndTexture>(
         this.getSubLayerProps({
           id: 'tiles'
@@ -472,14 +458,14 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
               textureMaxZoom: this.props.textureMaxZoom,
               maxZoom: this.props.maxZoom,
               meshMaxError,
-              elevationDecoder: elevationDecoderToUpdateTrigger(elevationDecoder),
-              projectionMode
+              elevationDecoder,
+              projectionMode: this.context.viewport.projectionMode
             }
           },
           onViewportLoad: this.onViewportLoad.bind(this),
           zRange: this.state.zRange || null,
           tileSize,
-          maxZoom: elevationMaxZoom ?? maxZoom,
+          maxZoom: meshMaxZoom ?? maxZoom,
           minZoom,
           extent,
           maxRequests,
