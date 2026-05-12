@@ -18,6 +18,8 @@ import {SimpleMeshLayer} from '@deck.gl/mesh-layers';
 import {COORDINATE_SYSTEM} from '@deck.gl/core';
 import type {MeshAttributes} from '@loaders.gl/schema';
 import {TerrainWorkerLoader} from '@loaders.gl/terrain';
+import {ImageLoader} from '@loaders.gl/images';
+import {makeGridTerrainMesh} from './grid-terrain-mesh';
 import TileLayer, {TileLayerProps} from '../tile-layer/tile-layer';
 import type {
   Bounds,
@@ -42,6 +44,17 @@ const defaultProps: DefaultProps<TerrainLayerProps> = {
   texture: {...urlType, optional: true},
   // Martini error tolerance in meters, smaller number -> more detailed mesh
   meshMaxError: {type: 'number', value: 4.0},
+  // Maximum tile zoom used for the terrain texture. When provided, this drives
+  // the TerrainLayer tile grid so imagery can refine past the mesh source zoom.
+  textureMaxZoom: null,
+  // Maximum tile zoom used for the elevation source. Higher render tiles sample
+  // the matching subsection of the capped parent height tile.
+  meshMaxZoom: null,
+  // Tesselator: 'auto' (Martini/Delatin via @loaders.gl/terrain worker) or
+  // 'grid' (fixed-resolution lng/lat grid, valid on MapView and GlobeView)
+  tesselator: 'auto',
+  // Vertices per side for the grid tesselator (ignored when tesselator !== 'grid')
+  gridSize: {type: 'number', value: 65},
   // Bounding box of the terrain image, [minX, minY, maxX, maxY] in world coordinates
   bounds: {type: 'array', value: null, optional: true, compare: true},
   // Color to use if texture is unavailable
@@ -65,7 +78,7 @@ const defaultProps: DefaultProps<TerrainLayerProps> = {
   wireframe: false,
   material: true,
 
-  loaders: [TerrainWorkerLoader]
+  loaders: [TerrainWorkerLoader, ImageLoader]
 };
 
 // Turns array of templates into a single string to work around shallow change
@@ -112,6 +125,62 @@ function getEffectiveMeshMaxError(meshMaxError: number): number {
   return Math.max(meshMaxError, MIN_TERRAIN_MESH_MAX_ERROR);
 }
 
+function normalizeMaxZoom(zoom?: number | null): number | null {
+  return typeof zoom === 'number' && Number.isFinite(zoom) ? Math.max(0, Math.floor(zoom)) : null;
+}
+
+function getTerrainTileMaxZoom({
+  maxZoom,
+  textureMaxZoom,
+  meshMaxZoom
+}: {
+  maxZoom?: number | null;
+  textureMaxZoom?: number | null;
+  meshMaxZoom?: number | null;
+}): number | null | undefined {
+  const hardMaxZoom = normalizeMaxZoom(maxZoom);
+  const sourceMaxZoom = normalizeMaxZoom(textureMaxZoom) ?? normalizeMaxZoom(meshMaxZoom);
+
+  if (sourceMaxZoom === null) {
+    return maxZoom;
+  }
+  if (hardMaxZoom === null) {
+    return sourceMaxZoom;
+  }
+  return Math.min(hardMaxZoom, sourceMaxZoom);
+}
+
+function getSourceTile(
+  tile: TileLoadProps,
+  maxZoom?: number | null
+): {
+  index: TileLoadProps['index'];
+  sampleBounds?: [number, number, number, number];
+} {
+  const normalizedMaxZoom = normalizeMaxZoom(maxZoom);
+  const {x, y, z} = tile.index;
+
+  if (normalizedMaxZoom === null || z <= normalizedMaxZoom) {
+    return {index: tile.index};
+  }
+
+  const scale = 2 ** (z - normalizedMaxZoom);
+  const sourceX = Math.floor(x / scale);
+  const sourceY = Math.floor(y / scale);
+  const offsetX = x - sourceX * scale;
+  const offsetY = y - sourceY * scale;
+
+  return {
+    index: {x: sourceX, y: sourceY, z: normalizedMaxZoom},
+    sampleBounds: [
+      offsetX / scale,
+      offsetY / scale,
+      (offsetX + 1) / scale,
+      (offsetY + 1) / scale
+    ]
+  };
+}
+
 type ElevationDecoder = {rScaler: number; gScaler: number; bScaler: number; offset: number};
 type TerrainLoadProps = {
   bounds: Bounds;
@@ -144,6 +213,25 @@ type _TerrainLayerProps = {
 
   /** Martini error tolerance in meters, smaller number -> more detailed mesh. **/
   meshMaxError?: number;
+
+  /** Maximum tile zoom used for texture imagery. **/
+  textureMaxZoom?: number | null;
+
+  /** Maximum tile zoom used for elevation mesh source imagery. **/
+  meshMaxZoom?: number | null;
+
+  /**
+   * Tesselator used to turn a terrain-RGB tile into a mesh. `'grid'` uses
+   * a fixed-resolution grid in lng/lat — cheaper on CPU and portable across
+   * MapView/GlobeView without re-tesselating on projection change.
+   */
+  tesselator?: 'auto' | 'grid';
+
+  /**
+   * Vertices per side for the grid tesselator. Default 65 (≈8k tris per tile).
+   * Bump to 129 for higher fidelity; drop to 33 to halve vertex cost.
+   */
+  gridSize?: number;
 
   /** Bounding box of the terrain image, [minX, minY, maxX, maxY] in world coordinates. **/
   bounds?: Bounds | null;
@@ -235,12 +323,50 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
   }
 
   getTiledTerrainData(tile: TileLoadProps): Promise<MeshAndTexture> {
-    const {elevationData, fetch, texture, elevationDecoder, meshMaxError} = this.props;
+    const {
+      elevationData,
+      fetch,
+      texture,
+      elevationDecoder,
+      meshMaxError,
+      textureMaxZoom,
+      meshMaxZoom,
+      tesselator,
+      gridSize
+    } = this.props;
     const {viewport} = this.context;
-    const dataUrl = getURLFromTemplate(elevationData, tile);
-    const textureUrl = texture && getURLFromTemplate(texture, tile);
+    const meshTile: ReturnType<typeof getSourceTile> = viewport.isGeospatial
+      ? getSourceTile(tile, meshMaxZoom)
+      : {index: tile.index};
+    const textureTile = getSourceTile(tile, textureMaxZoom);
+    const dataUrl = getURLFromTemplate(elevationData, {...tile, index: meshTile.index});
+    const textureUrl = texture && getURLFromTemplate(texture, {...tile, index: textureTile.index});
 
     const {signal} = tile;
+
+    // Grid path keeps bounds in lng/lat degrees so the mesh renders via LNGLAT
+    // on both MapView and GlobeView — no projectFlat bake, no invalidation on
+    // projection toggle.
+    if ((tesselator === 'grid' || meshTile.sampleBounds) && viewport.isGeospatial) {
+      const bbox = tile.bbox as GeoBoundingBox;
+      const bounds: Bounds = [bbox.west, bbox.south, bbox.east, bbox.north];
+      const effectiveMeshMaxError = getEffectiveMeshMaxError(meshMaxError);
+      const terrain = this.loadGridTerrain({
+        elevationData: dataUrl,
+        bounds,
+        elevationDecoder,
+        gridSize,
+        sampleBounds: meshTile.sampleBounds,
+        skirtHeight: effectiveMeshMaxError * 2,
+        signal
+      });
+      const surface = textureUrl
+        ? fetch(textureUrl, {propName: 'texture', layer: this, loaders: [], signal}).catch(
+            _ => null
+          )
+        : Promise.resolve(null);
+      return Promise.all([terrain, surface]);
+    }
 
     let bottomLeft = [0, 0] as [number, number];
     let topRight = [0, 0] as [number, number];
@@ -273,6 +399,52 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
       : Promise.resolve(null);
 
     return Promise.all([terrain, surface]);
+  }
+
+  // Fetch a terrain-RGB tile as raw pixels and run the grid tesselator
+  // in-process. The grid is cheap enough that worker handoff overhead
+  // dominates, so the main-thread path is faster than the worker loader.
+  loadGridTerrain({
+    elevationData,
+    bounds,
+    elevationDecoder,
+    gridSize,
+    sampleBounds,
+    skirtHeight,
+    signal
+  }: {
+    elevationData: string | null;
+    bounds: Bounds;
+    elevationDecoder: ElevationDecoder;
+    gridSize: number;
+    sampleBounds?: [number, number, number, number];
+    skirtHeight: number;
+    signal?: AbortSignal;
+  }): Promise<MeshAttributes | null> {
+    if (!elevationData) {
+      return Promise.resolve(null);
+    }
+    const {fetch} = this.props;
+    const loadOptions = {
+      ...this.getLoadOptions(),
+      image: {type: 'data' as const}
+    };
+    return fetch(elevationData, {
+      propName: 'elevationData',
+      layer: this,
+      loaders: [ImageLoader],
+      loadOptions,
+      signal
+    }).then((image: {data: Uint8ClampedArray; width: number; height: number}) => {
+      if (!image) return null;
+      return makeGridTerrainMesh(image, {
+        bounds: bounds as [number, number, number, number],
+        elevationDecoder,
+        sampleBounds,
+        gridSize,
+        skirtHeight
+      }) as unknown as MeshAttributes;
+    });
   }
 
   renderSubLayers(
@@ -356,6 +528,10 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
       wireframe,
       meshMaxError,
       elevationDecoder,
+      textureMaxZoom,
+      meshMaxZoom,
+      tesselator,
+      gridSize,
       tileSize,
       maxZoom,
       minZoom,
@@ -370,7 +546,13 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     } = this.props;
 
     if (this.state.isTiled) {
-      const projectionMode = this.context.viewport.projectionMode;
+      const tileMaxZoom = getTerrainTileMaxZoom({maxZoom, textureMaxZoom, meshMaxZoom});
+      // Legacy (Martini/Delatin) meshes are baked into the active viewport's
+      // projectFlat frame, so toggling projections must rebuild every tile.
+      // Grid meshes are lng/lat/elev and stay valid across projections, so
+      // projectionMode is omitted from the update trigger there.
+      const isGridPath = tesselator === 'grid';
+      const projectionMode = isGridPath ? undefined : this.context.viewport.projectionMode;
       return new TileLayer<MeshAndTexture>(
         this.getSubLayerProps({
           id: 'tiles'
@@ -383,14 +565,18 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
               elevationData: urlTemplateToUpdateTrigger(elevationData),
               texture: urlTemplateToUpdateTrigger(texture),
               meshMaxError,
+              textureMaxZoom,
+              meshMaxZoom,
               elevationDecoder: elevationDecoderToUpdateTrigger(elevationDecoder),
+              tesselator,
+              gridSize,
               projectionMode
             }
           },
           onViewportLoad: this.onViewportLoad.bind(this),
           zRange: this.state.zRange || null,
           tileSize,
-          maxZoom,
+          maxZoom: tileMaxZoom,
           minZoom,
           extent,
           maxRequests,
