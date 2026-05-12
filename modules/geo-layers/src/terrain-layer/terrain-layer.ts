@@ -33,6 +33,7 @@ const TILE_OVERLAP_PIXELS = 1;
 const MIN_TERRAIN_MESH_MAX_ERROR = 1;
 const MAX_LATITUDE = 90;
 const MAX_LONGITUDE = 180;
+const MAX_STITCHED_TEXTURE_TILE_SCALE = 4;
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const RADIANS_TO_DEGREES = 180 / Math.PI;
 const defaultProps: DefaultProps<TerrainLayerProps> = {
@@ -63,7 +64,7 @@ const defaultProps: DefaultProps<TerrainLayerProps> = {
   wireframe: false,
   material: true,
   meshMaxZoom: 15,
-  textureMaxZoom: 23,
+  textureMaxZoom: null,
 
   loaders: [TerrainWorkerLoader]
 };
@@ -329,7 +330,8 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     }
 
     const viewportZoom = Math.floor(this.context.viewport.zoom);
-    return Math.max(meshZoom, Math.min(textureZoom as number, viewportZoom));
+    const highestStitchableZoom = meshZoom + Math.log2(MAX_STITCHED_TEXTURE_TILE_SCALE);
+    return Math.max(meshZoom, Math.min(textureZoom as number, viewportZoom, highestStitchableZoom));
   }
 
   private fetchTextureTile(
