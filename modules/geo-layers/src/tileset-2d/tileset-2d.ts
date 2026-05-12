@@ -467,105 +467,38 @@ export class Tileset2D {
   private _getCullBounds = memoize(getCullBounds);
 
   private _getRequestPriority(tile: Tile2DHeader): number {
-    // RequestScheduler loads lower priority values first. Negative priorities cancel requests.
-    const distance = this._getTileDistanceSquared(tile);
     if (tile.isSelected) {
-      return SELECTED_TILE_PRIORITY + distance;
+      return this._getTileDistanceToViewportCenter(tile);
     }
     if (tile.isVisible) {
-      return VISIBLE_TILE_PRIORITY + distance;
+      return 1e6 + this._getTileDistanceToViewportCenter(tile);
     }
-    if (tile.isPrefetch) {
-      if (!tile.isCoveragePrefetch) {
-        return EDGE_PREFETCH_TILE_PRIORITY + distance;
-      }
-      return (
-        PREFETCH_TILE_PRIORITY + this.getTileZoom(tile.index) * PREFETCH_ZOOM_PRIORITY + distance
-      );
-    }
-    return CANCEL_TILE_PRIORITY;
+    return -1;
   }
 
-  private _getTileDistanceSquared(tile: Tile2DHeader): number {
+  private _getTileDistanceToViewportCenter(tile: Tile2DHeader): number {
     const {width, height} = this._viewport || {};
     if (!this._viewport || !width || !height) {
       return 0;
     }
 
+    const {bbox} = tile;
+    const center =
+      'west' in bbox
+        ? ([(bbox.west + bbox.east) / 2, (bbox.south + bbox.north) / 2] as [number, number])
+        : ([(bbox.left + bbox.right) / 2, (bbox.top + bbox.bottom) / 2] as [number, number]);
+
     try {
-      const points = this._getTileScreenCorners(tile.bbox);
-      const center: [number, number] = [width / 2, height / 2];
-      if (points.length === 4) {
-        if (this._isPointInPolygon(center, points)) {
-          return 0;
-        }
-        return points.reduce((minDistance, point, i) => {
-          const nextPoint = points[(i + 1) % points.length];
-          return Math.min(
-            minDistance,
-            this._getPointToSegmentDistanceSquared(center, point, nextPoint)
-          );
-        }, Number.MAX_SAFE_INTEGER);
+      const [x, y] = this._viewport.project(center);
+      if (Number.isFinite(x) && Number.isFinite(y)) {
+        const dx = x - width / 2;
+        const dy = y - height / 2;
+        return dx * dx + dy * dy;
       }
     } catch {
       // Some viewport/tile combinations are not projectable. Keep them valid but lowest priority.
     }
     return Number.MAX_SAFE_INTEGER;
-  }
-
-  private _getTileScreenCorners(bbox: TileBoundingBox): [number, number][] {
-    const coordinates: [number, number][] =
-      'west' in bbox
-        ? [
-            [bbox.west, bbox.south],
-            [bbox.east, bbox.south],
-            [bbox.east, bbox.north],
-            [bbox.west, bbox.north]
-          ]
-        : [
-            [bbox.left, bbox.top],
-            [bbox.right, bbox.top],
-            [bbox.right, bbox.bottom],
-            [bbox.left, bbox.bottom]
-          ];
-
-    return coordinates
-      .map(coordinate => this._viewport!.project(coordinate))
-      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y)) as [number, number][];
-  }
-
-  private _isPointInPolygon(point: [number, number], polygon: [number, number][]): boolean {
-    let inside = false;
-    const [x, y] = point;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      const [xi, yi] = polygon[i];
-      const [xj, yj] = polygon[j];
-      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
-        inside = !inside;
-      }
-    }
-    return inside;
-  }
-
-  private _getPointToSegmentDistanceSquared(
-    point: [number, number],
-    segmentStart: [number, number],
-    segmentEnd: [number, number]
-  ): number {
-    const [x, y] = point;
-    const [x1, y1] = segmentStart;
-    const [x2, y2] = segmentEnd;
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const lengthSquared = dx * dx + dy * dy;
-    const t = lengthSquared
-      ? Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / lengthSquared))
-      : 0;
-    const segmentX = x1 + t * dx;
-    const segmentY = y1 + t * dy;
-    const distanceX = x - segmentX;
-    const distanceY = y - segmentY;
-    return distanceX * distanceX + distanceY * distanceY;
   }
 
   private _pruneRequests(): void {
