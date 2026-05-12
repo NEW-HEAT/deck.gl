@@ -64,8 +64,8 @@ const defaultProps: DefaultProps<TerrainLayerProps> = {
   // Same as SimpleMeshLayer wireframe
   wireframe: false,
   material: true,
-  meshMaxZoom: 21,
-  textureMaxZoom: null,
+  meshMaxZoom: 14,
+  textureMaxZoom: 21,
 
   loaders: [TerrainWorkerLoader]
 };
