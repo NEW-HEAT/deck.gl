@@ -40,6 +40,12 @@ const defaultProps: DefaultProps<TerrainLayerProps> = {
   texture: {...urlType, optional: true},
   // Martini error tolerance in meters, smaller number -> more detailed mesh
   meshMaxError: {type: 'number', value: 4.0},
+  // Maximum tile zoom used for the terrain texture. When provided, this drives
+  // the TerrainLayer tile grid so imagery can refine past the mesh source zoom.
+  textureMaxZoom: null,
+  // Maximum tile zoom used for the elevation source. Higher render tiles sample
+  // the matching subsection of the capped parent height tile.
+  meshMaxZoom: null,
   // Tesselator: 'auto' (Martini/Delatin via @loaders.gl/terrain worker) or
   // 'grid' (fixed-resolution lng/lat grid, valid on MapView and GlobeView)
   tesselator: 'auto',
@@ -86,6 +92,62 @@ function elevationDecoderToUpdateTrigger(decoder: ElevationDecoder): string {
   return `${decoder.rScaler}|${decoder.gScaler}|${decoder.bScaler}|${decoder.offset}`;
 }
 
+function normalizeMaxZoom(zoom?: number | null): number | null {
+  return typeof zoom === 'number' && Number.isFinite(zoom) ? Math.max(0, Math.floor(zoom)) : null;
+}
+
+function getTerrainTileMaxZoom({
+  maxZoom,
+  textureMaxZoom,
+  meshMaxZoom
+}: {
+  maxZoom?: number | null;
+  textureMaxZoom?: number | null;
+  meshMaxZoom?: number | null;
+}): number | null | undefined {
+  const hardMaxZoom = normalizeMaxZoom(maxZoom);
+  const sourceMaxZoom = normalizeMaxZoom(textureMaxZoom) ?? normalizeMaxZoom(meshMaxZoom);
+
+  if (sourceMaxZoom === null) {
+    return maxZoom;
+  }
+  if (hardMaxZoom === null) {
+    return sourceMaxZoom;
+  }
+  return Math.min(hardMaxZoom, sourceMaxZoom);
+}
+
+function getSourceTile(
+  tile: TileLoadProps,
+  maxZoom?: number | null
+): {
+  index: TileLoadProps['index'];
+  sampleBounds?: [number, number, number, number];
+} {
+  const normalizedMaxZoom = normalizeMaxZoom(maxZoom);
+  const {x, y, z} = tile.index;
+
+  if (normalizedMaxZoom === null || z <= normalizedMaxZoom) {
+    return {index: tile.index};
+  }
+
+  const scale = 2 ** (z - normalizedMaxZoom);
+  const sourceX = Math.floor(x / scale);
+  const sourceY = Math.floor(y / scale);
+  const offsetX = x - sourceX * scale;
+  const offsetY = y - sourceY * scale;
+
+  return {
+    index: {x: sourceX, y: sourceY, z: normalizedMaxZoom},
+    sampleBounds: [
+      offsetX / scale,
+      offsetY / scale,
+      (offsetX + 1) / scale,
+      (offsetY + 1) / scale
+    ]
+  };
+}
+
 type ElevationDecoder = {rScaler: number; gScaler: number; bScaler: number; offset: number};
 type TerrainLoadProps = {
   bounds: Bounds;
@@ -112,6 +174,12 @@ type _TerrainLayerProps = {
 
   /** Martini error tolerance in meters, smaller number -> more detailed mesh. **/
   meshMaxError?: number;
+
+  /** Maximum tile zoom used for texture imagery. **/
+  textureMaxZoom?: number | null;
+
+  /** Maximum tile zoom used for elevation mesh source imagery. **/
+  meshMaxZoom?: number | null;
 
   /**
    * Tesselator used to turn a terrain-RGB tile into a mesh. `'grid'` uses
@@ -215,18 +283,29 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
   }
 
   getTiledTerrainData(tile: TileLoadProps): Promise<MeshAndTexture> {
-    const {elevationData, fetch, texture, elevationDecoder, meshMaxError, tesselator, gridSize} =
-      this.props;
+    const {
+      elevationData,
+      fetch,
+      texture,
+      elevationDecoder,
+      meshMaxError,
+      textureMaxZoom,
+      meshMaxZoom,
+      tesselator,
+      gridSize
+    } = this.props;
     const {viewport} = this.context;
-    const dataUrl = getURLFromTemplate(elevationData, tile);
-    const textureUrl = texture && getURLFromTemplate(texture, tile);
+    const meshTile = viewport.isGeospatial ? getSourceTile(tile, meshMaxZoom) : {index: tile.index};
+    const textureTile = getSourceTile(tile, textureMaxZoom);
+    const dataUrl = getURLFromTemplate(elevationData, {...tile, index: meshTile.index});
+    const textureUrl = texture && getURLFromTemplate(texture, {...tile, index: textureTile.index});
 
     const {signal} = tile;
 
     // Grid path keeps bounds in lng/lat degrees so the mesh renders via LNGLAT
     // on both MapView and GlobeView — no projectFlat bake, no invalidation on
     // projection toggle.
-    if (tesselator === 'grid' && viewport.isGeospatial) {
+    if ((tesselator === 'grid' || meshTile.sampleBounds) && viewport.isGeospatial) {
       const bbox = tile.bbox as GeoBoundingBox;
       const bounds: Bounds = [bbox.west, bbox.south, bbox.east, bbox.north];
       const terrain = this.loadGridTerrain({
@@ -234,6 +313,7 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
         bounds,
         elevationDecoder,
         gridSize,
+        sampleBounds: meshTile.sampleBounds,
         skirtHeight: meshMaxError * 2,
         signal
       });
@@ -281,6 +361,7 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     bounds,
     elevationDecoder,
     gridSize,
+    sampleBounds,
     skirtHeight,
     signal
   }: {
@@ -288,6 +369,7 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     bounds: Bounds;
     elevationDecoder: ElevationDecoder;
     gridSize: number;
+    sampleBounds?: [number, number, number, number];
     skirtHeight: number;
     signal?: AbortSignal;
   }): Promise<MeshAttributes | null> {
@@ -310,6 +392,7 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
       return makeGridTerrainMesh(image, {
         bounds: bounds as [number, number, number, number],
         elevationDecoder,
+        sampleBounds,
         gridSize,
         skirtHeight
       }) as unknown as MeshAttributes;
@@ -396,6 +479,8 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
       wireframe,
       meshMaxError,
       elevationDecoder,
+      textureMaxZoom,
+      meshMaxZoom,
       tesselator,
       gridSize,
       tileSize,
@@ -412,6 +497,7 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     } = this.props;
 
     if (this.state.isTiled) {
+      const tileMaxZoom = getTerrainTileMaxZoom({maxZoom, textureMaxZoom, meshMaxZoom});
       // Legacy (Martini/Delatin) meshes are baked into the active viewport's
       // projectFlat frame, so toggling projections must rebuild every tile.
       // Grid meshes are lng/lat/elev and stay valid across projections, so
@@ -430,6 +516,8 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
               elevationData: urlTemplateToUpdateTrigger(elevationData),
               texture: urlTemplateToUpdateTrigger(texture),
               meshMaxError,
+              textureMaxZoom,
+              meshMaxZoom,
               elevationDecoder: elevationDecoderToUpdateTrigger(elevationDecoder),
               tesselator,
               gridSize,
@@ -439,7 +527,7 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
           onViewportLoad: this.onViewportLoad.bind(this),
           zRange: this.state.zRange || null,
           tileSize,
-          maxZoom,
+          maxZoom: tileMaxZoom,
           minZoom,
           extent,
           maxRequests,

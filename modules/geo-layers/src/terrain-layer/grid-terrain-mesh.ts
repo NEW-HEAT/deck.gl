@@ -32,6 +32,10 @@ export type GridMeshOptions = {
   // TerrainLayer on GlobeView, these are tile bounds in degrees.
   bounds: [number, number, number, number];
   elevationDecoder: ElevationDecoder;
+  // Subregion of the source height image to sample, in normalized image
+  // coordinates [minU, minV, maxU, maxV]. Used when the mesh source is capped
+  // below the render tile zoom and a child tile samples its parent image.
+  sampleBounds?: [number, number, number, number];
   // Vertices per side. 33 → 1089 verts, 2048 tris per tile; a good default.
   gridSize?: number;
   // Meters to drop edge vertices to hide seams between adjacent tiles.
@@ -108,8 +112,15 @@ export function makeGridTerrainMesh(
   indices: {value: Uint32Array; size: 1};
   attributes: MeshAttributes;
 } {
-  const {bounds, elevationDecoder, gridSize = 33, skirtHeight = 0} = options;
+  const {
+    bounds,
+    elevationDecoder,
+    sampleBounds = [0, 0, 1, 1],
+    gridSize = 33,
+    skirtHeight = 0
+  } = options;
   const [west, south, east, north] = bounds;
+  const [sampleMinU, sampleMinV, sampleMaxU, sampleMaxV] = sampleBounds;
   const N = gridSize;
 
   const mercYNorth = latToMercatorY(north);
@@ -148,7 +159,9 @@ export function makeGridTerrainMesh(
       const u = i / (N - 1);
       const lng = west + u * (east - west);
 
-      let elev = sampleElevationBilinear(image, u, v, elevationDecoder);
+      const sampleU = sampleMinU + u * (sampleMaxU - sampleMinU);
+      const sampleV = sampleMinV + v * (sampleMaxV - sampleMinV);
+      let elev = sampleElevationBilinear(image, sampleU, sampleV, elevationDecoder);
 
       // Clamp to Earth's physical elevation range. Terrain-RGB encodes
       // elevation into 24 bits across three 8-bit channels, so one corrupt
