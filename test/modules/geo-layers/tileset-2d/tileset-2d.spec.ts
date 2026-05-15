@@ -37,6 +37,15 @@ test('Tileset2D#constructor', () => {
 
   tileset.setOptions({maxZoom: 13});
   expect(tileset._maxZoom, 'maxZoom is set').toBe(13);
+
+  tileset.setOptions({maxRequests: 12, debounceTime: 25});
+  expect(tileset._requestScheduler.props.maxRequests, 'request scheduler maxRequests updates').toBe(
+    12
+  );
+  expect(
+    tileset._requestScheduler.props.debounceTime,
+    'request scheduler debounceTime updates'
+  ).toBe(25);
 });
 
 test('Tileset2D#update', () => {

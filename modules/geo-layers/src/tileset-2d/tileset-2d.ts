@@ -203,6 +203,11 @@ export class Tileset2D {
 
   setOptions(opts: Tileset2DProps): void {
     Object.assign(this.opts, opts);
+    this._requestScheduler?.setProps({
+      throttleRequests: this.opts.maxRequests > 0 || this.opts.debounceTime > 0,
+      maxRequests: this.opts.maxRequests,
+      debounceTime: this.opts.debounceTime
+    });
     if (Number.isFinite(opts.maxZoom)) {
       this._maxZoom = Math.floor(opts.maxZoom as number);
     }
