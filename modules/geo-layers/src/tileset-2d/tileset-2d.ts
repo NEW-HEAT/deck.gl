@@ -10,7 +10,7 @@ import {Matrix4, equals, NumericArray} from '@math.gl/core';
 import {Tile2DHeader} from './tile-2d-header';
 
 import {getTileIndices, tileToBoundingBox, getCullBounds, transformBox} from './utils';
-import {Bounds, TileBoundingBox, TileIndex, ZRange} from './types';
+import {Bounds, TileIndex, ZRange} from './types';
 import {TileLoadProps} from './types';
 import {memoize} from './memoize';
 
@@ -53,12 +53,10 @@ export type LODStrategy = 'none' | 'coverage';
 const DEFAULT_CACHE_SCALE = 5;
 const COVERAGE_ZOOM_DELTA = 2;
 const MIN_COVERAGE_ZOOM = 4;
-const CANCEL_TILE_PRIORITY = -1;
+const CENTER_SELECTED_TILE_PRIORITY = 0;
 const PREFETCH_TILE_PRIORITY = 1e6;
-const PREFETCH_ZOOM_PRIORITY = 1e5;
-const SELECTED_TILE_PRIORITY = 1e8;
-const EDGE_PREFETCH_TILE_PRIORITY = 2e8;
-const VISIBLE_TILE_PRIORITY = 3e8;
+const EDGE_SELECTED_TILE_PRIORITY = 1e8;
+const VISIBLE_TILE_PRIORITY = 2e8;
 
 const STRATEGIES = {
   [STRATEGY_DEFAULT]: updateTileStateDefault,
@@ -94,8 +92,6 @@ export type Tileset2DProps<DataT = any> = {
   debounceTime?: number;
   /** Changes the zoom level at which the tiles are fetched. Needs to be an integer. @default 0 */
   zoomOffset?: number;
-  /** Number of same-zoom neighbor tiles to prefetch around selected tiles. @default 0 */
-  prefetchTileRadius?: number;
   /** The minimum zoom level at which tiles are visible. @default null */
   visibleMinZoom?: number | null;
   /** The maximum zoom level at which tiles are visible. @default null */
@@ -128,7 +124,6 @@ export const DEFAULT_TILESET2D_PROPS: Omit<Required<Tileset2DProps>, 'getTileDat
   maxRequests: 6,
   debounceTime: 0,
   zoomOffset: 0,
-  prefetchTileRadius: 0,
   visibleMinZoom: null,
   visibleMaxZoom: null,
 
@@ -155,7 +150,6 @@ export class Tileset2D {
   private _zRange: ZRange | null;
   private _selectedTiles: Tile2DHeader[] | null;
   private _prefetchTiles: Tile2DHeader[];
-  private _coveragePrefetchTileIds: Set<string>;
   private _frameNumber: number;
   private _modelMatrix: Matrix4;
   private _modelMatrixInverse: Matrix4;
@@ -198,7 +192,6 @@ export class Tileset2D {
     this._zRange = null;
     this._selectedTiles = null;
     this._prefetchTiles = [];
-    this._coveragePrefetchTileIds = new Set();
     this._frameNumber = 0;
 
     this._modelMatrix = new Matrix4();
@@ -434,7 +427,6 @@ export class Tileset2D {
       tile.isSelected = false;
       tile.isVisible = false;
       tile.isPrefetch = false;
-      tile.isCoveragePrefetch = false;
     }
     // @ts-expect-error called only when _selectedTiles is already defined
     for (const tile of this._selectedTiles) {
@@ -443,7 +435,6 @@ export class Tileset2D {
     }
     for (const tile of this._prefetchTiles) {
       tile.isPrefetch = true;
-      tile.isCoveragePrefetch = this._coveragePrefetchTileIds.has(tile.id);
     }
 
     // Strategy-specific state logic
@@ -469,11 +460,19 @@ export class Tileset2D {
   private _getRequestPriority(tile: Tile2DHeader): number {
     // RequestScheduler loads lower priority values first.
     const distance = this._getTileDistanceSquared(tile);
+    if (tile.isSelected && this._isNearViewportCenter(distance)) {
+      return CENTER_SELECTED_TILE_PRIORITY + distance;
+    }
+    if (tile.isPrefetch) {
+      return (
+        PREFETCH_TILE_PRIORITY + this.getTileZoom(tile.index) * PREFETCH_TILE_PRIORITY + distance
+      );
+    }
     if (tile.isSelected) {
-      return distance;
+      return EDGE_SELECTED_TILE_PRIORITY + distance;
     }
     if (tile.isVisible) {
-      return 1e6 + distance;
+      return VISIBLE_TILE_PRIORITY + distance;
     }
     return -1;
   }
@@ -501,6 +500,15 @@ export class Tileset2D {
       // Some viewport/tile combinations are not projectable. Keep them valid but lowest priority.
     }
     return Number.MAX_SAFE_INTEGER;
+  }
+
+  private _isNearViewportCenter(distanceSquared: number): boolean {
+    const {width, height} = this._viewport || {};
+    if (!width || !height) {
+      return true;
+    }
+    const radius = Math.min(width, height) * 0.4;
+    return distanceSquared <= radius * radius;
   }
 
   private _pruneRequests(): void {
@@ -634,85 +642,33 @@ export class Tileset2D {
 
   private _updatePrefetchTiles(): void {
     this._prefetchTiles = [];
-    this._coveragePrefetchTileIds.clear();
-    if (!this._selectedTiles) {
+    if (this.opts.lodStrategy !== LOD_STRATEGY_COVERAGE || !this._selectedTiles) {
       return;
     }
 
+    const minZoom = this._getMinCoverageZoom();
     const seen = new Set<string>();
-    if (this.opts.lodStrategy === LOD_STRATEGY_COVERAGE) {
-      const minZoom = this._getMinCoverageZoom();
-      for (const selectedTile of this._selectedTiles) {
-        const selectedZoom = this.getTileZoom(selectedTile.index);
-        if (selectedZoom <= minZoom) {
-          continue;
-        }
-
-        const coverageZoom = Math.max(minZoom, selectedZoom - COVERAGE_ZOOM_DELTA);
-        for (const zoom of [coverageZoom, minZoom]) {
-          this._addPrefetchTile(this._getAncestorIndex(selectedTile.index, zoom), seen, true);
-        }
-      }
-    }
-
-    this._updateEdgePrefetchTiles(seen);
-  }
-
-  private _updateEdgePrefetchTiles(seen: Set<string>): void {
-    const radius = Math.max(0, Math.floor(this.opts.prefetchTileRadius));
-    if (!radius || !this._selectedTiles) {
-      return;
-    }
-
     for (const selectedTile of this._selectedTiles) {
-      const {x, y, z} = selectedTile.index;
-      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+      const selectedZoom = this.getTileZoom(selectedTile.index);
+      if (selectedZoom <= minZoom) {
         continue;
       }
 
-      for (let dx = -radius; dx <= radius; dx++) {
-        for (let dy = -radius; dy <= radius; dy++) {
-          if (dx === 0 && dy === 0) {
-            continue;
-          }
-          const index = this._normalizeNeighborIndex({x: x + dx, y: y + dy, z});
-          if (index) {
-            this._addPrefetchTile(index, seen, false);
-          }
+      const coverageZoom = Math.max(minZoom, selectedZoom - COVERAGE_ZOOM_DELTA);
+      for (const zoom of [coverageZoom, minZoom]) {
+        const index = this._getAncestorIndex(selectedTile.index, zoom);
+        const id = this.getTileId(index);
+        if (seen.has(id)) {
+          continue;
+        }
+        seen.add(id);
+
+        const tile = this._getTile(index, true);
+        if (tile && !tile.isSelected) {
+          tile.isPrefetch = true;
+          this._prefetchTiles.push(tile);
         }
       }
-    }
-  }
-
-  private _normalizeNeighborIndex(index: TileIndex): TileIndex | null {
-    if (this._viewport?.isGeospatial) {
-      const scale = Math.pow(2, index.z);
-      const x = ((index.x % scale) + scale) % scale;
-      if (index.y < 0 || index.y >= scale) {
-        return null;
-      }
-      return {x, y: index.y, z: index.z};
-    }
-    return index;
-  }
-
-  private _addPrefetchTile(
-    index: TileIndex,
-    seen: Set<string>,
-    coveragePrefetch: boolean
-  ): void {
-    const id = this.getTileId(index);
-    if (seen.has(id)) {
-      return;
-    }
-    seen.add(id);
-
-    const tile = this._getTile(index, true);
-    if (tile && !tile.isSelected) {
-      if (coveragePrefetch) {
-        this._coveragePrefetchTileIds.add(tile.id);
-      }
-      this._prefetchTiles.push(tile);
     }
   }
 
