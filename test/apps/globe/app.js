@@ -27,7 +27,7 @@ const GRATICULES = getGraticules(30);
 export const deck = new Deck({
   views: new GlobeView(),
   initialViewState: INITIAL_VIEW_STATE,
-  controller: {inertia: 500},
+  controller: {inertia: 400},
   parameters: {
     cull: true
   },

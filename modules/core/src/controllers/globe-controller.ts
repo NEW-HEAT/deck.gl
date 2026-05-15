@@ -9,7 +9,7 @@ import {MapState, MapStateProps} from './map-controller';
 import type {MapStateInternal} from './map-controller';
 import {mod} from '../utils/math-utils';
 import LinearInterpolator from '../transitions/linear-interpolator';
-import {zoomAdjust, GLOBE_RADIUS} from '../viewports/globe-viewport';
+import GlobeViewport, {zoomAdjust, GLOBE_RADIUS} from '../viewports/globe-viewport';
 import {
   Globe,
   type CameraFrame,
@@ -142,10 +142,46 @@ class GlobeState extends MapState {
     }) as GlobeState;
   }
 
-  zoom({scale}: {scale: number}): MapState {
-    const startZoom = this.getState().startZoom || this.getViewportProps().zoom;
-    const zoom = startZoom + Math.log2(scale);
-    return this._getUpdatedState({zoom});
+  zoomStart({pos}: {pos: [number, number]}): GlobeState {
+    return this._getUpdatedState({
+      startZoomLngLat: this._unprojectOnGlobe(pos),
+      startZoom: this.getViewportProps().zoom
+    }) as GlobeState;
+  }
+
+  zoom({
+    pos,
+    startPos,
+    scale
+  }: {
+    pos: [number, number];
+    startPos?: [number, number];
+    scale: number;
+  }): MapState {
+    let {startZoom, startZoomLngLat} = this.getState();
+
+    if (!startZoomLngLat) {
+      startZoom = startZoom ?? this.getViewportProps().zoom;
+      startZoomLngLat = this._unprojectOnGlobe(startPos) || this._unprojectOnGlobe(pos);
+    }
+
+    const zoom = this._constrainZoom((startZoom as number) + Math.log2(scale));
+    if (!startZoomLngLat) {
+      return this._getUpdatedState({zoom});
+    }
+
+    const zoomedViewport = this.makeViewport({...this.getViewportProps(), zoom}) as GlobeViewport;
+    return this._getUpdatedState({
+      zoom,
+      ...zoomedViewport.panByLngLat(startZoomLngLat, pos)
+    });
+  }
+
+  zoomEnd(): GlobeState {
+    return this._getUpdatedState({
+      startZoomLngLat: null,
+      startZoom: null
+    }) as GlobeState;
   }
 
   _panFromCenter(offset: [number, number]): GlobeState {
@@ -241,6 +277,20 @@ class GlobeState extends MapState {
 
     const zoomAdjustment = zoomAdjust(props.latitude, true) - zoomAdjust(0, true);
     return clamp(zoom, minZoom + zoomAdjustment, maxZoom + zoomAdjustment);
+  }
+
+  private _unprojectOnGlobe(pos?: [number, number]): [number, number] | undefined {
+    if (!pos) {
+      return undefined;
+    }
+
+    const viewport = this.makeViewport(this.getViewportProps()) as GlobeViewport;
+    if (!viewport.isPointOnGlobe(pos)) {
+      return undefined;
+    }
+
+    const lngLat = viewport.unproject(pos);
+    return [lngLat[0], lngLat[1]];
   }
 }
 

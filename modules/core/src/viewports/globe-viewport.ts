@@ -191,6 +191,38 @@ export default class GlobeViewport extends Viewport {
     ];
   }
 
+  getGlobeRayDistanceRatio(
+    xy: number[],
+    {topLeft = true, targetZ}: {topLeft?: boolean; targetZ?: number} = {}
+  ): number {
+    const [x, y] = xy;
+    const y2 = topLeft ? y : this.height - y;
+    const {pixelUnprojectionMatrix} = this;
+
+    const coord0 = transformVector(pixelUnprojectionMatrix, [x, y2, -1, 1]);
+    const coord1 = transformVector(pixelUnprojectionMatrix, [x, y2, 1, 1]);
+
+    const lt = ((targetZ || 0) / EARTH_RADIUS + 1) * GLOBE_RADIUS;
+    const lSqr = vec3.sqrLen(vec3.sub([], coord0, coord1));
+    const l0Sqr = vec3.sqrLen(coord0);
+    const l1Sqr = vec3.sqrLen(coord1);
+    const sSqr = (4 * l0Sqr * l1Sqr - (lSqr - l0Sqr - l1Sqr) ** 2) / 16;
+    const dSqr = (4 * sSqr) / lSqr;
+
+    return Math.sqrt(Math.max(0, dSqr)) / lt;
+  }
+
+  isPointOnGlobe(
+    xy: number[],
+    {
+      topLeft = true,
+      targetZ,
+      maxDistanceRatio = 1
+    }: {topLeft?: boolean; targetZ?: number; maxDistanceRatio?: number} = {}
+  ): boolean {
+    return this.getGlobeRayDistanceRatio(xy, {topLeft, targetZ}) <= maxDistanceRatio;
+  }
+
   unproject(
     xyz: number[],
     {topLeft = true, targetZ}: {topLeft?: boolean; targetZ?: number} = {}
@@ -282,6 +314,28 @@ export default class GlobeViewport extends Viewport {
     const out = {longitude, latitude, zoom: startZoom - zoomAdjust(startLat)};
     out.zoom += zoomAdjust(out.latitude);
     return out;
+  }
+
+  /**
+   * Pan the globe so that a known geographic point remains under a screen pixel.
+   * Used for cursor/touch-anchored zoom when the pointer is on the globe surface.
+   */
+  panByLngLat(coords: number[], pixel: number[]): GlobeViewportOptions {
+    const distanceRatio = this.getGlobeRayDistanceRatio(pixel);
+    if (distanceRatio > 1) {
+      return {longitude: this.longitude, latitude: this.latitude};
+    }
+
+    const currentAtPixel = this.unproject(pixel);
+    const edgeT = Math.max(0, Math.min(1, (distanceRatio - 0.75) / 0.25));
+    const anchorStrength = 1 - edgeT * 0.65;
+    const longitude = this.longitude + (coords[0] - currentAtPixel[0]) * anchorStrength;
+    const latitude = Math.max(
+      Math.min(this.latitude + (coords[1] - currentAtPixel[1]) * anchorStrength, 90),
+      -90
+    );
+
+    return {longitude, latitude};
   }
 }
 
