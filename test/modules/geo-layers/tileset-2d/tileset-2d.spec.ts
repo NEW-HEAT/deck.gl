@@ -64,6 +64,24 @@ test('Tileset2D#update', () => {
   expect(tileset.tiles[0].bbox, 'tile has metadata').toBeTruthy();
 });
 
+test('Tileset2D#update with coverage LOD', () => {
+  const tileset = new Tileset2D({
+    getTileData,
+    lodStrategy: 'coverage',
+    onTileLoad: () => {}
+  });
+  tileset.update(testViewport);
+
+  expect(tileset._cache.get('0-0-0')?.isPrefetch, 'root coverage tile is prefetched').toBe(true);
+  expect(
+    tileset._cache.get('292-391-10')?.isPrefetch,
+    'lower resolution coverage tile is prefetched'
+  ).toBe(true);
+  expect(tileset._cache.get('1171-1566-12')?.isSelected, 'target tile remains selected').toBe(true);
+
+  tileset.finalize();
+});
+
 test('Tileset2D#updateOnModelMatrix', () => {
   const tileset = new Tileset2D({
     getTileData,
