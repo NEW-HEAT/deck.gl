@@ -57,6 +57,7 @@ test('TerrainLayer#separate elevation and texture zooms', async () => {
     texture: 'texture/{z}/{x}/{y}.png',
     maxZoom: 12,
     meshMaxZoom: 11,
+    lodStrategy: 'coverage',
     fetch: url => {
       urls.push(url);
       return Promise.resolve(null);
@@ -75,6 +76,7 @@ test('TerrainLayer#separate elevation and texture zooms', async () => {
   layer.state = {isTiled: true};
   const tileLayer = layer.renderLayers() as TileLayer;
   expect(tileLayer.props.maxZoom, 'TileLayer maxZoom uses meshMaxZoom').toBe(11);
+  expect(tileLayer.props.lodStrategy, 'TileLayer receives coverage LOD strategy').toBe('coverage');
 
   await layer.getTiledTerrainData({
     index: {x: 1, y: 2, z: 11},
