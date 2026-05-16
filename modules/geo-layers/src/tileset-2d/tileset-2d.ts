@@ -565,13 +565,24 @@ export class Tileset2D {
 
     const abortCandidates: Tile2DHeader[] = [];
     let ongoingRequestCount = 0;
+    let currentViewportNeedsTiles = false;
     for (const tile of this._cache.values()) {
+      if ((tile.isSelected || tile.isVisible || tile.isPrefetch) && !tile.isLoaded) {
+        currentViewportNeedsTiles = true;
+      }
       // Keep track of all the ongoing requests
       if (tile.isLoading) {
         ongoingRequestCount++;
         if (!tile.isSelected && !tile.isVisible && !tile.isPrefetch) {
           abortCandidates.push(tile);
         }
+      }
+    }
+
+    if (currentViewportNeedsTiles && abortCandidates.length > 0) {
+      for (const tile of abortCandidates.splice(0)) {
+        tile.abort();
+        ongoingRequestCount--;
       }
     }
 

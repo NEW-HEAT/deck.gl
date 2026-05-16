@@ -385,7 +385,7 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     return new SubLayerClass(props, {
       data: DUMMY_DATA,
       mesh,
-      texture,
+      ...(texture ? {texture} : {}),
       _instanced: false,
       coordinateSystem,
       getPosition: d => [0, 0, 0],
@@ -492,7 +492,7 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
       {
         data: DUMMY_DATA,
         mesh: this.state.terrain,
-        texture,
+        ...(texture ? {texture} : {}),
         _instanced: false,
         getPosition: d => [0, 0, 0],
         getColor: color,
