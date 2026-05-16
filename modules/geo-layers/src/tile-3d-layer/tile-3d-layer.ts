@@ -43,7 +43,7 @@ const defaultProps: DefaultProps<Tile3DLayerProps> = {
   onTilesetLoad: {type: 'function', value: tileset3d => {}},
   onTileLoad: {type: 'function', value: tileHeader => {}},
   onTileUnload: {type: 'function', value: tileHeader => {}},
-  onTileError: {type: 'function', value: (tile, message, url) => {}},
+  onTileError: {type: 'function', value: (tile, url, message) => {}},
   _getMeshColor: {type: 'function', value: tileHeader => [255, 255, 255]}
 };
 
@@ -74,7 +74,7 @@ type _Tile3DLayerProps<DataT> = {
   onTileUnload?: (tile: Tile3D) => void;
 
   /** Called when a tile fails to load. **/
-  onTileError?: (tile: Tile3D, url: string, message: string) => void;
+  onTileError?: (tile: Tile3D | null, url: string, message: string) => void;
 
   /** (Experimental) Accessor to change color of mesh based on properties. **/
   _getMeshColor?: (tile: Tile3D) => Color;
@@ -119,7 +119,11 @@ export default class Tile3DLayer<DataT = any, ExtraPropsT extends {} = {}> exten
   updateState({props, oldProps, changeFlags}: UpdateParameters<this>): void {
     if (props.data && props.data !== oldProps.data) {
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
-      this._loadTileset(props.data);
+      this._loadTileset(props.data).catch(error => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.props.onTileError(null, props.data, message);
+        this.raiseError(error instanceof Error ? error : new Error(message), 'loading 3D tileset');
+      });
     }
 
     if (changeFlags.viewportChanged) {

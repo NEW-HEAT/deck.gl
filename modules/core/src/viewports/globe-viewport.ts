@@ -13,6 +13,8 @@ const DEGREES_TO_RADIANS = Math.PI / 180;
 const RADIANS_TO_DEGREES = 180 / Math.PI;
 const EARTH_RADIUS = 6370972;
 export const GLOBE_RADIUS = 256;
+const GLOBE_ZOOM_ANCHOR_DAMPING_START_RATIO = 0.75;
+const GLOBE_ZOOM_ANCHOR_MIN_STRENGTH = 0.35;
 import {MAX_LATITUDE} from '@math.gl/web-mercator';
 
 function getDistanceScales() {
@@ -320,18 +322,25 @@ export default class GlobeViewport extends Viewport {
    * Pan the globe so that a known geographic point remains under a screen pixel.
    * Used for cursor/touch-anchored zoom when the pointer is on the globe surface.
    */
-  panByLngLat(coords: number[], pixel: number[]): GlobeViewportOptions {
+  panByGlobeAnchor(anchorLngLat: number[], pixel: number[]): GlobeViewportOptions {
     const distanceRatio = this.getGlobeRayDistanceRatio(pixel);
     if (distanceRatio > 1) {
       return {longitude: this.longitude, latitude: this.latitude};
     }
 
     const currentAtPixel = this.unproject(pixel);
-    const edgeT = Math.max(0, Math.min(1, (distanceRatio - 0.75) / 0.25));
-    const anchorStrength = 1 - edgeT * 0.65;
-    const longitude = this.longitude + (coords[0] - currentAtPixel[0]) * anchorStrength;
+    const edgeProgress = Math.max(
+      0,
+      Math.min(
+        1,
+        (distanceRatio - GLOBE_ZOOM_ANCHOR_DAMPING_START_RATIO) /
+          (1 - GLOBE_ZOOM_ANCHOR_DAMPING_START_RATIO)
+      )
+    );
+    const anchorStrength = 1 - edgeProgress * (1 - GLOBE_ZOOM_ANCHOR_MIN_STRENGTH);
+    const longitude = this.longitude + (anchorLngLat[0] - currentAtPixel[0]) * anchorStrength;
     const latitude = Math.max(
-      Math.min(this.latitude + (coords[1] - currentAtPixel[1]) * anchorStrength, 90),
+      Math.min(this.latitude + (anchorLngLat[1] - currentAtPixel[1]) * anchorStrength, 90),
       -90
     );
 

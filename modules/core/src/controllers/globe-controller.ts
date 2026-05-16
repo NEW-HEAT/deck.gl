@@ -35,12 +35,15 @@ function pixelsToDegrees(pixels: number, zoom: number = 0): number {
   return radians * RADIANS_TO_DEGREES;
 }
 
+type GlobeZoomAround = 'center' | 'pointer';
+
 type GlobeStateInternal = MapStateInternal & {
   startPanPos?: [number, number];
   startPanCameraFrame?: CameraFrame;
   startPanAngularRate?: number;
   /** When true, bearing is held fixed during pan (north stays up) */
   startPanLockBearing?: boolean;
+  zoomAround?: GlobeZoomAround;
 };
 
 class GlobeState extends MapState {
@@ -48,6 +51,7 @@ class GlobeState extends MapState {
     options: MapStateProps &
       GlobeStateInternal & {
         makeViewport: (props: Record<string, any>) => any;
+        zoomAround?: GlobeZoomAround;
       }
   ) {
     const {
@@ -55,6 +59,7 @@ class GlobeState extends MapState {
       startPanCameraFrame,
       startPanAngularRate,
       startPanLockBearing,
+      zoomAround,
       ...mapStateOptions
     } = options;
     mapStateOptions.normalize = false;
@@ -65,6 +70,7 @@ class GlobeState extends MapState {
     if (startPanCameraFrame !== undefined) s.startPanCameraFrame = startPanCameraFrame;
     if (startPanAngularRate !== undefined) s.startPanAngularRate = startPanAngularRate;
     if (startPanLockBearing !== undefined) s.startPanLockBearing = startPanLockBearing;
+    if (zoomAround !== undefined) s.zoomAround = zoomAround;
   }
 
   panStart({pos}: {pos: [number, number]}): GlobeState {
@@ -143,8 +149,12 @@ class GlobeState extends MapState {
   }
 
   zoomStart({pos}: {pos: [number, number]}): GlobeState {
+    const startZoomLngLat = this._shouldZoomAroundPointer()
+      ? this._unprojectOnGlobe(pos)
+      : undefined;
+
     return this._getUpdatedState({
-      startZoomLngLat: this._unprojectOnGlobe(pos),
+      startZoomLngLat,
       startZoom: this.getViewportProps().zoom
     }) as GlobeState;
   }
@@ -158,14 +168,21 @@ class GlobeState extends MapState {
     startPos?: [number, number];
     scale: number;
   }): MapState {
-    let {startZoom, startZoomLngLat} = this.getState();
+    const state = this.getState();
+    const {startZoom} = state;
+    let {startZoomLngLat} = state;
+    const hasZoomStart = startZoom !== undefined;
+    const startZoomValue = (startZoom as number) ?? this.getViewportProps().zoom;
+    const zoom = this._constrainZoom(startZoomValue + Math.log2(scale));
 
-    if (!startZoomLngLat) {
-      startZoom = startZoom ?? this.getViewportProps().zoom;
+    if (!this._shouldZoomAroundPointer()) {
+      return this._getUpdatedState({zoom});
+    }
+
+    if (!startZoomLngLat && !hasZoomStart) {
       startZoomLngLat = this._unprojectOnGlobe(startPos) || this._unprojectOnGlobe(pos);
     }
 
-    const zoom = this._constrainZoom((startZoom as number) + Math.log2(scale));
     if (!startZoomLngLat) {
       return this._getUpdatedState({zoom});
     }
@@ -173,7 +190,7 @@ class GlobeState extends MapState {
     const zoomedViewport = this.makeViewport({...this.getViewportProps(), zoom}) as GlobeViewport;
     return this._getUpdatedState({
       zoom,
-      ...zoomedViewport.panByLngLat(startZoomLngLat, pos)
+      ...zoomedViewport.panByGlobeAnchor(startZoomLngLat, pos)
     });
   }
 
@@ -291,6 +308,10 @@ class GlobeState extends MapState {
 
     const lngLat = viewport.unproject(pos);
     return [lngLat[0], lngLat[1]];
+  }
+
+  private _shouldZoomAroundPointer(): boolean {
+    return (this.getState() as GlobeStateInternal).zoomAround === 'pointer';
   }
 }
 

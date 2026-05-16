@@ -71,6 +71,8 @@ export type ControllerOptions = {
       };
   /** Drag behavior without pressing function keys, one of `pan` and `rotate`. */
   dragMode?: 'pan' | 'rotate';
+  /** Zoom anchor, one of `center` and `pointer`. Default depends on the controller. */
+  zoomAround?: 'center' | 'pointer';
   /** Enable inertia after panning/pinching. If a number is provided, indicates the duration of time over which the velocity reduces to zero, in milliseconds. Default `false`. */
   inertia?: boolean | number;
   /** Bounding box of content that the controller is constrained in */
@@ -377,7 +379,7 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     this.toggleEvents(EVENT_TYPES.PINCH, isInteractive && (touchZoom || touchRotate));
     this.toggleEvents(EVENT_TYPES.MULTI_PAN, isInteractive && touchRotate);
     this.toggleEvents(EVENT_TYPES.DOUBLE_CLICK, isInteractive && doubleClickZoom);
-    this.toggleEvents(EVENT_TYPES.DOUBLE_TAP_DRAG, isInteractive && touchZoom && doubleClickZoom);
+    this.toggleEvents(EVENT_TYPES.DOUBLE_TAP_DRAG, isInteractive && touchZoom);
     this.toggleEvents(EVENT_TYPES.KEYBOARD, isInteractive && keyboard);
 
     // Interaction toggles
@@ -782,7 +784,7 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
   }
 
   protected _onPointerDown(event: MjolnirEvent): boolean {
-    if (!this.touchZoom || !this.doubleClickZoom || !this._isPrimaryPointer(event)) {
+    if (!this.touchZoom || !this._isPrimaryPointer(event)) {
       this._resetOneFingerZoom();
       return false;
     }

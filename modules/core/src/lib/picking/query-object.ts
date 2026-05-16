@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) vis.gl contributors
 
-import log from '../../utils/log';
 import type Layer from '../layer';
 import type Viewport from '../../viewports/viewport';
 import type {PickingColorDecoder} from '../../passes/pick-layers-pass';
@@ -88,7 +87,8 @@ export function getClosestObject({
         pickedY: y + dy
       };
     }
-    log.error('Picked non-existent layer. Is picking buffer corrupt?')();
+    // A pick buffer can briefly outlive its layer list during composite layer
+    // churn or depth-only surface sampling. Treat stale layer colors as no hit.
   }
   return NO_PICKED_OBJECT;
 }
@@ -124,8 +124,6 @@ export function getUniqueObjects({
               ...pickedObject,
               color: pickedColor
             });
-          } else {
-            log.error('Picked non-existent layer. Is picking buffer corrupt?')();
           }
         }
       }
