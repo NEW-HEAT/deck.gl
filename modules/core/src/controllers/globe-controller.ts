@@ -302,7 +302,14 @@ class GlobeState extends MapState {
     }
 
     const viewport = this.makeViewport(this.getViewportProps()) as GlobeViewport;
-    if (!viewport.isPointOnGlobe(pos)) {
+    const isPointOnGlobe =
+      typeof viewport.isPointOnGlobe === 'function'
+        ? viewport.isPointOnGlobe(pos)
+        : typeof viewport.getGlobeRayDistanceRatio === 'function'
+          ? viewport.getGlobeRayDistanceRatio(pos) <= 1
+          : true;
+
+    if (!isPointOnGlobe) {
       return undefined;
     }
 
