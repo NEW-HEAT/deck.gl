@@ -293,7 +293,7 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
       return null;
     }
 
-    const textureZoom = this.getTextureZoom(tile.index.z);
+    const textureZoom = this.getTextureZoom(tile.index.z, tile.isPrefetch === true);
     if (textureZoom <= tile.index.z) {
       return this.fetchTextureTile(texture, tile, signal);
     }
@@ -322,7 +322,11 @@ export default class TerrainLayer<ExtraPropsT extends {} = {}> extends Composite
     return stitchTextureTiles(textures, scale);
   }
 
-  private getTextureZoom(meshZoom: number): number {
+  private getTextureZoom(meshZoom: number, isPrefetch = false): number {
+    if (isPrefetch) {
+      return meshZoom;
+    }
+
     const {textureMaxZoom, maxZoom} = this.props;
     const textureZoom = textureMaxZoom ?? maxZoom;
     if (!Number.isFinite(textureZoom)) {

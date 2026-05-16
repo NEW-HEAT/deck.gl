@@ -21,4 +21,7 @@ export type TileLoadProps = {
   signal?: AbortSignal;
   userData?: Record<string, any>;
   zoom?: number;
+  isSelected?: boolean;
+  isVisible?: boolean;
+  isPrefetch?: boolean;
 };

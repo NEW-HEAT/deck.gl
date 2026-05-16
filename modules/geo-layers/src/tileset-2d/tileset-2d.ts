@@ -53,9 +53,12 @@ export type LODStrategy = 'none' | 'coverage';
 const DEFAULT_CACHE_SCALE = 5;
 const COVERAGE_ZOOM_DELTA = 2;
 const MIN_COVERAGE_ZOOM = 4;
-const SELECTED_TILE_PRIORITY = 0;
-const VISIBLE_TILE_PRIORITY = 1e8;
-const PREFETCH_TILE_PRIORITY = 2e8;
+const COVERAGE_PREFETCH_TILE_PRIORITY = 0;
+const SELECTED_TILE_PRIORITY = 1e8;
+const VISIBLE_TILE_PRIORITY = 2e8;
+const PREFETCH_TILE_PRIORITY = 3e8;
+const ZOOM_PRIORITY_DELTA = 1e6;
+const MAX_DISTANCE_PRIORITY = ZOOM_PRIORITY_DELTA - 1;
 
 const STRATEGIES = {
   [STRATEGY_DEFAULT]: updateTileStateDefault,
@@ -463,7 +466,14 @@ export class Tileset2D {
 
   private _getRequestPriority(tile: Tile2DHeader): number {
     // RequestScheduler loads lower priority values first.
-    const distance = this._getTileDistanceSquared(tile);
+    const distance = Math.min(this._getTileDistanceSquared(tile), MAX_DISTANCE_PRIORITY);
+    if (tile.isPrefetch && this.opts.lodStrategy === LOD_STRATEGY_COVERAGE) {
+      return (
+        COVERAGE_PREFETCH_TILE_PRIORITY +
+        this.getTileZoom(tile.index) * ZOOM_PRIORITY_DELTA +
+        distance
+      );
+    }
     if (tile.isSelected) {
       return SELECTED_TILE_PRIORITY + distance;
     }
@@ -472,7 +482,7 @@ export class Tileset2D {
     }
     if (tile.isPrefetch) {
       return (
-        PREFETCH_TILE_PRIORITY + this.getTileZoom(tile.index) * PREFETCH_TILE_PRIORITY + distance
+        PREFETCH_TILE_PRIORITY + this.getTileZoom(tile.index) * ZOOM_PRIORITY_DELTA + distance
       );
     }
     return -1;
