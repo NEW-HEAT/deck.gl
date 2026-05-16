@@ -75,9 +75,9 @@ test('MapController does not apply pinch zoom inertia after quick lift', () => {
   }
 });
 
-test('MapController supports double-tap drag zoom', () => {
+test('MapController supports double-tap drag zoom when double click zoom is disabled', () => {
   const controller = createTestController({
-    view: new MapView({controller: true}),
+    view: new MapView({controller: {touchZoom: true, doubleClickZoom: false}}),
     initialViewState: {
       longitude: -122.45,
       latitude: 37.78,
