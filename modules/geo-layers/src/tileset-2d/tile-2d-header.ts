@@ -136,17 +136,7 @@ export class Tile2DHeader<DataT = any> {
     let tileData: DataT | null = null;
     let error;
     try {
-      tileData = await getData({
-        index,
-        id,
-        bbox,
-        userData,
-        zoom,
-        signal,
-        isSelected: this.isSelected,
-        isVisible: this.isVisible,
-        isPrefetch: this.isPrefetch
-      });
+      tileData = await getData({index, id, bbox, userData, zoom, signal});
     } catch (err) {
       error = err || true;
     } finally {
