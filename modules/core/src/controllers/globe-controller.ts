@@ -188,9 +188,14 @@ class GlobeState extends MapState {
     }
 
     const zoomedViewport = this.makeViewport({...this.getViewportProps(), zoom}) as GlobeViewport;
+    const panByAnchor =
+      typeof zoomedViewport.panByGlobeAnchor === 'function'
+        ? zoomedViewport.panByGlobeAnchor(startZoomLngLat, pos)
+        : {};
+
     return this._getUpdatedState({
       zoom,
-      ...zoomedViewport.panByGlobeAnchor(startZoomLngLat, pos)
+      ...panByAnchor
     });
   }
 
