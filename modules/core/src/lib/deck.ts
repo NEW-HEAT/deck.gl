@@ -1332,14 +1332,20 @@ export default class Deck<ViewsT extends ViewOrViews = null> {
       touchAction: this.props.touchAction,
       recognizers: Object.keys(RECOGNIZERS).map((eventName: string) => {
         // Resolve recognizer settings
-        const [RecognizerConstructor, defaultOptions, recognizeWith, requestFailure] =
+        const [RecognizerConstructor, defaultOptions, recognizeWith, requireFailure] =
           RECOGNIZERS[eventName];
         const optionsOverride = this.props.eventRecognizerOptions?.[eventName];
         const options = {...defaultOptions, ...optionsOverride, event: eventName};
         return {
           recognizer: new RecognizerConstructor(options),
           recognizeWith,
-          requestFailure
+          // Must match mjolnir's RecognizerTupleNormalized field name; the
+          // previous `requestFailure` was silently dropped by EventManager,
+          // disabling every requireFailure relationship declared in
+          // RECOGNIZERS (e.g. pinch waiting for multipan, click waiting for
+          // dblclick). On mobile this caused pinch to fire for any 2-finger
+          // touch and beat the multipan→pitch recognizer to the gesture.
+          requireFailure
         };
       }),
       events: {
