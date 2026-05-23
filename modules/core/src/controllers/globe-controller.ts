@@ -9,7 +9,7 @@ import {MapState, MapStateProps} from './map-controller';
 import type {MapStateInternal} from './map-controller';
 import {mod} from '../utils/math-utils';
 import LinearInterpolator from '../transitions/linear-interpolator';
-import {zoomAdjust, GLOBE_RADIUS} from '../viewports/globe-viewport';
+import GlobeViewport, {zoomAdjust, GLOBE_RADIUS} from '../viewports/globe-viewport';
 import {
   Globe,
   type CameraFrame,
@@ -33,6 +33,10 @@ function pixelsToDegrees(pixels: number, zoom: number = 0): number {
   const size = pixels / Math.pow(2, zoom);
   const radians = Math.asin(Math.min(1, size / GLOBE_RADIUS / 2)) * 2;
   return radians * RADIANS_TO_DEGREES;
+}
+
+function isGlobeViewport(viewport: unknown): viewport is GlobeViewport {
+  return viewport instanceof GlobeViewport && typeof viewport.panByGlobeAnchor === 'function';
 }
 
 type GlobeZoomAround = 'center' | 'pointer';
@@ -148,20 +152,66 @@ class GlobeState extends MapState {
     }) as GlobeState;
   }
 
-  zoomStart(): GlobeState {
+  zoomStart({pos}: {pos: [number, number]}): GlobeState {
+    const startZoomLngLat = this._shouldZoomAroundPointer()
+      ? this._unprojectOnGlobe(pos)
+      : undefined;
+
     return this._getUpdatedState({
+      startZoomLngLat,
       startZoom: this.getViewportProps().zoom
     }) as GlobeState;
   }
 
-  zoom({scale}: {scale: number}): MapState {
-    const startZoom = this.getState().startZoom || this.getViewportProps().zoom;
-    const zoom = this._constrainZoom(startZoom + Math.log2(scale));
-    return this._getUpdatedState({zoom});
+  zoom({
+    pos,
+    startPos,
+    scale
+  }: {
+    pos: [number, number];
+    startPos?: [number, number];
+    scale: number;
+  }): MapState {
+    const state = this.getState();
+    const {startZoom} = state;
+    let {startZoomLngLat} = state;
+    const hasZoomStart = startZoom !== undefined;
+    const startZoomValue = (startZoom as number) ?? this.getViewportProps().zoom;
+    const scaleLog2 = Math.log2(scale);
+    const zoom = this._constrainZoom(startZoomValue + scaleLog2);
+
+    // Skip pan-by-anchor when the gesture isn't actually zooming. This is the
+    // touch-pinch case where the user dragged 2 fingers in parallel (intent:
+    // pitch) and `scale` stayed at ~1 from sensor noise. Without this guard
+    // panByGlobeAnchor still re-anchors lng/lat to the centroid → camera
+    // pans following the fingers, which reads as "pinch wins, no pitch".
+    const SCALE_LOG2_PAN_THRESHOLD = 0.005;
+    if (!this._shouldZoomAroundPointer() || Math.abs(scaleLog2) < SCALE_LOG2_PAN_THRESHOLD) {
+      return this._getUpdatedState({zoom});
+    }
+
+    if (!startZoomLngLat && !hasZoomStart) {
+      startZoomLngLat = this._unprojectOnGlobe(startPos) || this._unprojectOnGlobe(pos);
+    }
+
+    if (!startZoomLngLat) {
+      return this._getUpdatedState({zoom});
+    }
+
+    const zoomedViewport = this.makeViewport({...this.getViewportProps(), zoom});
+    if (!isGlobeViewport(zoomedViewport)) {
+      return this._getUpdatedState({zoom});
+    }
+
+    return this._getUpdatedState({
+      zoom,
+      ...zoomedViewport.panByGlobeAnchor(startZoomLngLat, pos)
+    });
   }
 
   zoomEnd(): GlobeState {
     return this._getUpdatedState({
+      startZoomLngLat: null,
       startZoom: null
     }) as GlobeState;
   }
@@ -261,6 +311,23 @@ class GlobeState extends MapState {
     return clamp(zoom, minZoom + zoomAdjustment, maxZoom + zoomAdjustment);
   }
 
+  private _unprojectOnGlobe(pos?: [number, number]): [number, number] | undefined {
+    if (!pos) {
+      return undefined;
+    }
+
+    const viewport = this.makeViewport(this.getViewportProps());
+    if (!isGlobeViewport(viewport) || !viewport.isPointOnGlobe(pos)) {
+      return undefined;
+    }
+
+    const lngLat = viewport.unproject(pos);
+    return [lngLat[0], lngLat[1]];
+  }
+
+  private _shouldZoomAroundPointer(): boolean {
+    return (this.getState() as GlobeStateInternal).zoomAround === 'pointer';
+  }
 }
 
 export default class GlobeController extends Controller<MapState> {

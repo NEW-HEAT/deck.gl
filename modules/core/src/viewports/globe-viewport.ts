@@ -11,6 +11,12 @@ const DEGREES_TO_RADIANS = Math.PI / 180;
 const RADIANS_TO_DEGREES = 180 / Math.PI;
 const EARTH_RADIUS = 6370972;
 export const GLOBE_RADIUS = 256;
+// Where along the screen-pixel-to-globe-center distance ratio the anchored
+// zoom starts losing strength. Below this ratio the anchor pins exactly; from
+// here to the limb (ratio = 1) the anchor blends toward MIN_STRENGTH so a
+// near-edge pixel doesn't snap the camera across the globe.
+const GLOBE_ZOOM_ANCHOR_DAMPING_START_RATIO = 0.75;
+const GLOBE_ZOOM_ANCHOR_MIN_STRENGTH = 0.35;
 
 function getDistanceScales() {
   const unitsPerMeter = GLOBE_RADIUS / EARTH_RADIUS;
@@ -191,8 +197,8 @@ export default class GlobeViewport extends Viewport {
   /**
    * Builds the screen-pixel → globe-center ray and the intermediate ray/sphere
    * math reused by `unproject` (intersection point) and the public hit-test
-   * helper (`isPointOnGlobe`). One function so the same pixelUnprojectionMatrix
-   * work isn't duplicated.
+   * helpers (`isPointOnGlobe`, `panByGlobeAnchor`). One function so the same
+   * pixelUnprojectionMatrix work isn't duplicated.
    */
   private _getRayToGlobe(
     xy: number[],
@@ -344,6 +350,34 @@ export default class GlobeViewport extends Viewport {
     return out;
   }
 
+  /**
+   * Pan the globe so that a known geographic point remains under a screen pixel.
+   * Used for cursor/touch-anchored zoom when the pointer is on the globe surface.
+   */
+  panByGlobeAnchor(anchorLngLat: number[], pixel: number[]): GlobeViewportOptions {
+    const distanceRatio = this._getRayDistanceToGlobeCenterRatio(pixel);
+    if (distanceRatio > 1) {
+      return {longitude: this.longitude, latitude: this.latitude};
+    }
+
+    const currentAtPixel = this.unproject(pixel);
+    const edgeProgress = Math.max(
+      0,
+      Math.min(
+        1,
+        (distanceRatio - GLOBE_ZOOM_ANCHOR_DAMPING_START_RATIO) /
+          (1 - GLOBE_ZOOM_ANCHOR_DAMPING_START_RATIO)
+      )
+    );
+    const anchorStrength = 1 - edgeProgress * (1 - GLOBE_ZOOM_ANCHOR_MIN_STRENGTH);
+    const longitude = this.longitude + (anchorLngLat[0] - currentAtPixel[0]) * anchorStrength;
+    const latitude = Math.max(
+      Math.min(this.latitude + (anchorLngLat[1] - currentAtPixel[1]) * anchorStrength, 90),
+      -90
+    );
+
+    return {longitude, latitude};
+  }
 }
 
 export function zoomAdjust(latitude: number, clampToPoles?: boolean): number {

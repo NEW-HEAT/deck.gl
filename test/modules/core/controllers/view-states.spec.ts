@@ -8,13 +8,17 @@ import {
   OrbitController,
   FirstPersonController,
   _GlobeController as GlobeController,
+  _GlobeViewport as GlobeViewport,
   OrbitViewport,
   OrthographicController,
-  Viewport
+  Viewport,
+  WebMercatorViewport
 } from '@deck.gl/core';
 import {normalizeViewportProps} from '@math.gl/web-mercator';
 
 const dummyMakeViewport = (props: any) => new Viewport(props);
+const makeGlobeViewViewport = (props: any) =>
+  props.zoom > 12 ? new WebMercatorViewport(props) : new GlobeViewport(props);
 
 test('MapViewState', () => {
   const MapViewState = new MapController({} as any).ControllerState;
@@ -171,6 +175,42 @@ test('GlobeViewState', () => {
     'small bounds#latitude is adjusted'
   ).toBeTruthy();
   expect(viewportProps.zoom > 12, 'small bounds#zoom is adjusted').toBeTruthy();
+});
+
+test('GlobeViewState guards pointer anchored zoom across WebMercator fallback', () => {
+  const GlobeViewState = new GlobeController({} as any).ControllerState;
+
+  const pos: [number, number] = [500, 300];
+  let viewState = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 0,
+    zoom: 11.9,
+    zoomAround: 'pointer',
+    makeViewport: makeGlobeViewViewport
+  });
+
+  viewState = viewState.zoomStart({pos}).zoom({pos, scale: 1.25});
+  expect(
+    viewState.getViewportProps().zoom,
+    'zoom crosses into WebMercator fallback'
+  ).toBeGreaterThan(12);
+
+  viewState = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 0,
+    zoom: 12.5,
+    zoomAround: 'pointer',
+    makeViewport: makeGlobeViewViewport
+  });
+
+  expect(
+    () => viewState.zoom({pos, scale: 1.25}),
+    'high zoom fallback does not crash'
+  ).not.toThrow();
 });
 
 test('OrbitViewState', () => {
