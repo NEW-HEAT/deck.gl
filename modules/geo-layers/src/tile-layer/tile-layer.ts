@@ -334,7 +334,7 @@ export default class TileLayer<DataT = any, ExtraPropsT extends {} = {}> extends
   }
 
   _onTileError(error: any, tile: Tile2DHeader<DataT>) {
-    this.props.onTileError(error);
+    this.props.onTileError(error, tile);
     tile.layers = null;
 
     this.setNeedsUpdate();
