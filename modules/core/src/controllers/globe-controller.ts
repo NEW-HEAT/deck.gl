@@ -173,9 +173,16 @@ class GlobeState extends MapState {
     let {startZoomLngLat} = state;
     const hasZoomStart = startZoom !== undefined;
     const startZoomValue = (startZoom as number) ?? this.getViewportProps().zoom;
-    const zoom = this._constrainZoom(startZoomValue + Math.log2(scale));
+    const scaleLog2 = Math.log2(scale);
+    const zoom = this._constrainZoom(startZoomValue + scaleLog2);
 
-    if (!this._shouldZoomAroundPointer()) {
+    // Skip pan-by-anchor when the gesture isn't actually zooming. This is the
+    // touch-pinch case where the user dragged 2 fingers in parallel (intent:
+    // pitch) and `scale` stayed at ~1 from sensor noise. Without this guard
+    // panByGlobeAnchor still re-anchors lng/lat to the centroid → camera
+    // pans following the fingers, which reads as "pinch wins, no pitch".
+    const SCALE_LOG2_PAN_THRESHOLD = 0.005;
+    if (!this._shouldZoomAroundPointer() || Math.abs(scaleLog2) < SCALE_LOG2_PAN_THRESHOLD) {
       return this._getUpdatedState({zoom});
     }
 
