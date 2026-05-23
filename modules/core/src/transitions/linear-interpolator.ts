@@ -14,7 +14,6 @@ const DEFAULT_REQUIRED_PROPS = ['longitude', 'latitude', 'zoom'];
 type PropsWithAnchor = {
   around?: number[];
   aroundPosition?: number[];
-  aroundLngLat?: number[];
   [key: string]: any;
 };
 
@@ -79,21 +78,7 @@ export default class LinearInterpolator extends TransitionInterpolator {
 
     if (makeViewport && around) {
       const startViewport = makeViewport(startProps);
-      if (startViewport instanceof GlobeViewport) {
-        // GlobeViewport uses spherical anchoring: unproject the screen point
-        // to a lng/lat on the globe and feed that to panByGlobeAnchor each
-        // frame. If the click is off-globe, fall through to a plain LERP.
-        if (startViewport.isPointOnGlobe(around)) {
-          const aroundLngLat = startViewport.unproject(around);
-          result.start.around = around;
-          Object.assign(result.end, {
-            around,
-            aroundLngLat,
-            width: endProps.width,
-            height: endProps.height
-          });
-        }
-      } else {
+      if (!(startViewport instanceof GlobeViewport)) {
         const endViewport = makeViewport(endProps);
         const aroundPosition = startViewport.unproject(around);
         result.start.around = around;
@@ -119,7 +104,7 @@ export default class LinearInterpolator extends TransitionInterpolator {
       propsInTransition[key] = lerp(startProps[key] || 0, endProps[key] || 0, t);
     }
 
-    if (this.opts.makeViewport && (endProps.aroundPosition || endProps.aroundLngLat)) {
+    if (this.opts.makeViewport && endProps.aroundPosition) {
       // Linear transition should be performed in common space
       const viewport = this.opts.makeViewport({...endProps, ...propsInTransition});
       const anchorScreen = lerp(
@@ -128,17 +113,10 @@ export default class LinearInterpolator extends TransitionInterpolator {
         t
       ) as number[];
 
-      if (viewport instanceof GlobeViewport && endProps.aroundLngLat) {
-        Object.assign(
-          propsInTransition,
-          viewport.panByGlobeAnchor(endProps.aroundLngLat, anchorScreen)
-        );
-      } else if (endProps.aroundPosition) {
-        Object.assign(
-          propsInTransition,
-          viewport.panByPosition(endProps.aroundPosition, anchorScreen)
-        );
-      }
+      Object.assign(
+        propsInTransition,
+        viewport.panByPosition(endProps.aroundPosition, anchorScreen)
+      );
     }
     return propsInTransition;
   }
