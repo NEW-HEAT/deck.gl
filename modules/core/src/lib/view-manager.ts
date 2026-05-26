@@ -330,9 +330,18 @@ export default class ViewManager<ViewsT extends View[]> {
   ): Controller<any> | null {
     const controllerProps = view.controller;
     if (controllerProps && viewport) {
+      const viewProps = view.props as Record<string, unknown>;
       const resolvedProps = {
         ...viewState,
         ...controllerProps,
+        ...(viewProps.maxLatitude !== undefined ? {maxLatitude: viewProps.maxLatitude} : {}),
+        ...(viewProps.maxLatitudeZoomClamp !== undefined
+          ? {maxLatitudeZoomClamp: viewProps.maxLatitudeZoomClamp}
+          : {}),
+        ...(viewProps.minGlobeZoom !== undefined ? {minGlobeZoom: viewProps.minGlobeZoom} : {}),
+        ...(viewProps.lowZoomOrientationReset !== undefined
+          ? {lowZoomOrientationReset: viewProps.lowZoomOrientationReset}
+          : {}),
         id: view.id,
         x: viewport.x,
         y: viewport.y,

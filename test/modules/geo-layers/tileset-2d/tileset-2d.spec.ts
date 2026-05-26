@@ -55,6 +55,69 @@ test('Tileset2D#update', () => {
   expect(tileset.tiles[0].bbox, 'tile has metadata').toBeTruthy();
 });
 
+test('Tileset2D#update with coverage LOD', () => {
+  const tileset = new Tileset2D({
+    getTileData,
+    lodStrategy: 'coverage',
+    onTileLoad: () => {}
+  });
+  tileset.update(testViewport);
+
+  expect(tileset._cache.get('0-0-0')?.isPrefetch, 'root coverage tile is prefetched').toBe(true);
+  expect(
+    tileset._cache.get('292-391-10')?.isPrefetch,
+    'lower resolution coverage tile is prefetched'
+  ).toBe(true);
+  expect(tileset._cache.get('1171-1566-12')?.isSelected, 'target tile remains selected').toBe(true);
+
+  tileset.finalize();
+});
+
+test('Tileset2D#getRequestPriority ranks tiles by viewport coverage', () => {
+  const tileset = new Tileset2D({
+    getTileData,
+    onTileLoad: () => {}
+  });
+  Object.assign(tileset, {
+    _viewport: {
+      width: 100,
+      height: 100,
+      project: ([x, y]) => [x, y]
+    }
+  });
+
+  const selectedAtCenterEdge = {
+    bbox: {left: 0, top: 0, right: 50, bottom: 100},
+    index: {x: 0, y: 0, z: 10},
+    isSelected: true,
+    isVisible: true,
+    isPrefetch: false
+  };
+  const selectedNearCenter = {
+    bbox: {left: 60, top: 45, right: 70, bottom: 55},
+    index: {x: 1, y: 0, z: 10},
+    isSelected: true,
+    isVisible: true,
+    isPrefetch: false
+  };
+  const prefetchAtCenter = {
+    bbox: {left: 0, top: 0, right: 100, bottom: 100},
+    index: {x: 0, y: 0, z: 8},
+    isSelected: false,
+    isVisible: false,
+    isPrefetch: true
+  };
+
+  expect((tileset as any)._getRequestPriority(selectedAtCenterEdge)).toBeLessThan(
+    (tileset as any)._getRequestPriority(selectedNearCenter)
+  );
+  expect((tileset as any)._getRequestPriority(selectedNearCenter)).toBeLessThan(
+    (tileset as any)._getRequestPriority(prefetchAtCenter)
+  );
+
+  tileset.finalize();
+});
+
 test('Tileset2D#updateOnModelMatrix', () => {
   const tileset = new Tileset2D({
     getTileData,

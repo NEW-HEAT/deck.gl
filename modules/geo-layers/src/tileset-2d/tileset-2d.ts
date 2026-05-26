@@ -10,7 +10,7 @@ import {Matrix4, equals, NumericArray} from '@math.gl/core';
 import {Tile2DHeader} from './tile-2d-header';
 
 import {getTileIndices, tileToBoundingBox, getCullBounds, transformBox} from './utils';
-import {Bounds, TileIndex, ZRange} from './types';
+import {Bounds, TileBoundingBox, TileIndex, ZRange} from './types';
 import {TileLoadProps} from './types';
 import {memoize} from './memoize';
 
@@ -39,6 +39,8 @@ const TILE_STATE_VISIBLE = 2;
 export const STRATEGY_NEVER = 'never';
 export const STRATEGY_REPLACE = 'no-overlap';
 export const STRATEGY_DEFAULT = 'best-available';
+export const LOD_STRATEGY_NONE = 'none';
+export const LOD_STRATEGY_COVERAGE = 'coverage';
 
 export type RefinementStrategyFunction = (tiles: Tile2DHeader[]) => void;
 export type RefinementStrategy =
@@ -46,8 +48,14 @@ export type RefinementStrategy =
   | 'no-overlap'
   | 'best-available'
   | RefinementStrategyFunction;
+export type LODStrategy = 'none' | 'coverage';
 
 const DEFAULT_CACHE_SCALE = 5;
+const COVERAGE_ZOOM_DELTA = 2;
+const MIN_COVERAGE_ZOOM = 4;
+const SELECTED_TILE_PRIORITY = 0;
+const VISIBLE_TILE_PRIORITY = 1e8;
+const PREFETCH_TILE_PRIORITY = 2e8;
 
 const STRATEGIES = {
   [STRATEGY_DEFAULT]: updateTileStateDefault,
@@ -73,6 +81,8 @@ export type Tileset2DProps<DataT = any> = {
   maxCacheByteSize?: number | null;
   /** How the tile layer refines the visibility of tiles. @default 'best-available' */
   refinementStrategy?: RefinementStrategy;
+  /** How the tile layer prefetches lower resolution coverage. @default 'none' */
+  lodStrategy?: LODStrategy;
   /** Range of minimum and maximum heights in the tile. */
   zRange?: ZRange | null;
   /** The maximum number of concurrent getTileData calls. @default 6 */
@@ -108,6 +118,7 @@ export const DEFAULT_TILESET2D_PROPS: Omit<Required<Tileset2DProps>, 'getTileDat
   maxCacheSize: null,
   maxCacheByteSize: null,
   refinementStrategy: 'best-available',
+  lodStrategy: 'none',
   zRange: null,
   maxRequests: 6,
   debounceTime: 0,
@@ -137,6 +148,7 @@ export class Tileset2D {
   private _viewport: Viewport | null;
   private _zRange: ZRange | null;
   private _selectedTiles: Tile2DHeader[] | null;
+  private _prefetchTiles: Tile2DHeader[];
   private _frameNumber: number;
   private _modelMatrix: Matrix4;
   private _modelMatrixInverse: Matrix4;
@@ -178,6 +190,7 @@ export class Tileset2D {
     this._viewport = null;
     this._zRange = null;
     this._selectedTiles = null;
+    this._prefetchTiles = [];
     this._frameNumber = 0;
 
     this._modelMatrix = new Matrix4();
@@ -269,6 +282,7 @@ export class Tileset2D {
         modelMatrixInverse: this._modelMatrixInverse
       });
       this._selectedTiles = tileIndices.map(index => this._getTile(index, true));
+      this._updatePrefetchTiles();
 
       if (this._dirty) {
         // Some new tiles are added
@@ -277,6 +291,7 @@ export class Tileset2D {
       // Check for needed reloads explicitly even if the view/matrix has not changed.
     } else if (this.needsReload) {
       this._selectedTiles = this._selectedTiles!.map(tile => this._getTile(tile.index, true));
+      this._updatePrefetchTiles();
     }
 
     // Update tile states
@@ -410,11 +425,15 @@ export class Tileset2D {
       visibilities[i++] = tile.isVisible;
       tile.isSelected = false;
       tile.isVisible = false;
+      tile.isPrefetch = false;
     }
     // @ts-expect-error called only when _selectedTiles is already defined
     for (const tile of this._selectedTiles) {
       tile.isSelected = true;
       tile.isVisible = true;
+    }
+    for (const tile of this._prefetchTiles) {
+      tile.isPrefetch = true;
     }
 
     // Strategy-specific state logic
@@ -437,6 +456,105 @@ export class Tileset2D {
 
   private _getCullBounds = memoize(getCullBounds);
 
+  private _getRequestPriority(tile: Tile2DHeader): number {
+    // RequestScheduler loads lower priority values first.
+    const distance = this._getTileDistanceSquared(tile);
+    if (tile.isSelected) {
+      return SELECTED_TILE_PRIORITY + distance;
+    }
+    if (tile.isVisible) {
+      return VISIBLE_TILE_PRIORITY + distance;
+    }
+    if (tile.isPrefetch) {
+      return (
+        PREFETCH_TILE_PRIORITY + this.getTileZoom(tile.index) * PREFETCH_TILE_PRIORITY + distance
+      );
+    }
+    return -1;
+  }
+
+  private _getTileDistanceSquared(tile: Tile2DHeader): number {
+    const {width, height} = this._viewport || {};
+    if (!this._viewport || !width || !height) {
+      return 0;
+    }
+
+    try {
+      const points = this._getTileScreenCorners(tile.bbox);
+      const center: [number, number] = [width / 2, height / 2];
+      if (points.length === 4) {
+        if (this._isPointInPolygon(center, points)) {
+          return 0;
+        }
+        return points.reduce((minDistance, point, i) => {
+          const nextPoint = points[(i + 1) % points.length];
+          return Math.min(
+            minDistance,
+            this._getPointToSegmentDistanceSquared(center, point, nextPoint)
+          );
+        }, Number.MAX_SAFE_INTEGER);
+      }
+    } catch {
+      // Some viewport/tile combinations are not projectable. Keep them valid but lowest priority.
+    }
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  private _getTileScreenCorners(bbox: TileBoundingBox): [number, number][] {
+    const coordinates: [number, number][] =
+      'west' in bbox
+        ? [
+            [bbox.west, bbox.south],
+            [bbox.east, bbox.south],
+            [bbox.east, bbox.north],
+            [bbox.west, bbox.north]
+          ]
+        : [
+            [bbox.left, bbox.top],
+            [bbox.right, bbox.top],
+            [bbox.right, bbox.bottom],
+            [bbox.left, bbox.bottom]
+          ];
+
+    return coordinates
+      .map(coordinate => this._viewport!.project(coordinate))
+      .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y)) as [number, number][];
+  }
+
+  private _isPointInPolygon(point: [number, number], polygon: [number, number][]): boolean {
+    let inside = false;
+    const [x, y] = point;
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const [xi, yi] = polygon[i];
+      const [xj, yj] = polygon[j];
+      if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  }
+
+  private _getPointToSegmentDistanceSquared(
+    point: [number, number],
+    segmentStart: [number, number],
+    segmentEnd: [number, number]
+  ): number {
+    const [x, y] = point;
+    const [x1, y1] = segmentStart;
+    const [x2, y2] = segmentEnd;
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const lengthSquared = dx * dx + dy * dy;
+    const t = lengthSquared
+      ? Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / lengthSquared))
+      : 0;
+    const segmentX = x1 + t * dx;
+    const segmentY = y1 + t * dy;
+    const distanceX = x - segmentX;
+    const distanceY = y - segmentY;
+    return distanceX * distanceX + distanceY * distanceY;
+  }
+
   private _pruneRequests(): void {
     const {maxRequests = 0} = this.opts;
 
@@ -446,7 +564,7 @@ export class Tileset2D {
       // Keep track of all the ongoing requests
       if (tile.isLoading) {
         ongoingRequestCount++;
-        if (!tile.isSelected && !tile.isVisible) {
+        if (!tile.isSelected && !tile.isVisible && !tile.isPrefetch) {
           abortCandidates.push(tile);
         }
       }
@@ -498,16 +616,10 @@ export class Tileset2D {
     const overflown = _cache.size > maxCacheSize || this._cacheByteSize > maxCacheByteSize;
 
     if (overflown) {
-      for (const [id, tile] of _cache) {
-        if (!tile.isVisible && !tile.isSelected) {
-          // delete tile
-          this._cacheByteSize -= opts.maxCacheByteSize !== null ? tile.byteLength : 0;
-          _cache.delete(id);
-          this.opts.onTileUnload?.(tile);
-        }
-        if (_cache.size <= maxCacheSize && this._cacheByteSize <= maxCacheByteSize) {
-          break;
-        }
+      this._evictTiles(tile => !tile.isVisible && !tile.isSelected && !tile.isPrefetch);
+
+      if (_cache.size > maxCacheSize || this._cacheByteSize > maxCacheByteSize) {
+        this._evictTiles(tile => !tile.isVisible && !tile.isSelected);
       }
       this._rebuildTree();
       this._dirty = true;
@@ -520,6 +632,26 @@ export class Tileset2D {
     }
   }
   /* eslint-enable complexity */
+
+  private _evictTiles(shouldEvict: (tile: Tile2DHeader) => boolean): void {
+    const {_cache, opts} = this;
+    const maxCacheSize =
+      opts.maxCacheSize ??
+      // @ts-expect-error called only when selectedTiles is initialized
+      (opts.maxCacheByteSize !== null ? Infinity : DEFAULT_CACHE_SCALE * this.selectedTiles.length);
+    const maxCacheByteSize = opts.maxCacheByteSize ?? Infinity;
+
+    for (const [id, tile] of _cache) {
+      if (shouldEvict(tile)) {
+        this._cacheByteSize -= opts.maxCacheByteSize !== null ? tile.byteLength : 0;
+        _cache.delete(id);
+        this.opts.onTileUnload?.(tile);
+      }
+      if (_cache.size <= maxCacheSize && this._cacheByteSize <= maxCacheByteSize) {
+        break;
+      }
+    }
+  }
 
   private _getTile(index: TileIndex, create: true): Tile2DHeader;
   private _getTile(index: TileIndex, create?: false): Tile2DHeader | undefined;
@@ -542,6 +674,7 @@ export class Tileset2D {
       // eslint-disable-next-line @typescript-eslint/no-floating-promises
       tile.loadData({
         getData: this.opts.getTileData,
+        getPriority: this._getRequestPriority.bind(this),
         requestScheduler: this._requestScheduler,
         onLoad: this.onTileLoad,
         onError: this.opts.onTileError
@@ -549,6 +682,54 @@ export class Tileset2D {
     }
 
     return tile;
+  }
+
+  private _updatePrefetchTiles(): void {
+    this._prefetchTiles = [];
+    if (this.opts.lodStrategy !== LOD_STRATEGY_COVERAGE || !this._selectedTiles) {
+      return;
+    }
+
+    const minZoom = this._getMinCoverageZoom();
+    const seen = new Set<string>();
+    for (const selectedTile of this._selectedTiles) {
+      const selectedZoom = this.getTileZoom(selectedTile.index);
+      if (selectedZoom <= minZoom) {
+        continue;
+      }
+
+      const coverageZoom = Math.max(minZoom, selectedZoom - COVERAGE_ZOOM_DELTA);
+      for (const zoom of [coverageZoom, minZoom]) {
+        const index = this._getAncestorIndex(selectedTile.index, zoom);
+        const id = this.getTileId(index);
+        if (seen.has(id)) {
+          continue;
+        }
+        seen.add(id);
+
+        const tile = this._getTile(index, true);
+        if (tile && !tile.isSelected) {
+          tile.isPrefetch = true;
+          this._prefetchTiles.push(tile);
+        }
+      }
+    }
+  }
+
+  private _getAncestorIndex(index: TileIndex, zoom: number): TileIndex {
+    let ancestor = index;
+    while (this.getTileZoom(ancestor) > zoom) {
+      ancestor = this.getParentIndex(ancestor);
+    }
+    return ancestor;
+  }
+
+  private _getMinCoverageZoom(): number {
+    const minZoom = this._minZoom ?? 0;
+    if (this._viewport?.resolution) {
+      return Math.max(minZoom, MIN_COVERAGE_ZOOM);
+    }
+    return minZoom;
   }
 
   _getNearestAncestor(tile: Tile2DHeader): Tile2DHeader | null {

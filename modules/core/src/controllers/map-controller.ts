@@ -69,6 +69,17 @@ export type MapStateProps = {
   normalize?: boolean;
 
   maxBounds?: ControllerProps['maxBounds'];
+
+  /** GlobeView-only camera constraint, preserved on controller state props. */
+  maxLatitude?: unknown;
+  /** GlobeView-only dynamic min zoom derived from maxLatitude stops. */
+  maxLatitudeZoomClamp?: unknown;
+  /** GlobeView-only absolute lower zoom bound after globe-specific adjustment. */
+  minGlobeZoom?: unknown;
+  /** GlobeView-only low-zoom pitch/bearing reset, preserved on controller state props. */
+  lowZoomOrientationReset?: unknown;
+  /** GlobeView-only internal flag: reset transition frames bypass interactive orientation friction. */
+  globeOrientationResetTransition?: unknown;
 };
 
 export type MapStateInternal = {
@@ -154,7 +165,14 @@ export class MapState extends ViewState<MapState, MapStateProps, MapStateInterna
       startZoom,
 
       /** Normalize viewport props to fit map height into viewport */
-      normalize = true
+      normalize = true,
+
+      /** GlobeView-only constraints preserved for GlobeState.applyConstraints */
+      maxLatitude,
+      maxLatitudeZoomClamp,
+      minGlobeZoom,
+      lowZoomOrientationReset,
+      globeOrientationResetTransition
     } = options;
 
     assert(Number.isFinite(longitude)); // `longitude` must be supplied
@@ -179,7 +197,12 @@ export class MapState extends ViewState<MapState, MapStateProps, MapStateInterna
         minPitch,
         normalize,
         position,
-        maxBounds
+        maxBounds,
+        maxLatitude,
+        maxLatitudeZoomClamp,
+        minGlobeZoom,
+        lowZoomOrientationReset,
+        globeOrientationResetTransition
       },
       {
         startPanLngLat,

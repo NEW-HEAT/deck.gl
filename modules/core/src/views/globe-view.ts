@@ -5,7 +5,11 @@
 import View, {CommonViewState, CommonViewProps} from './view';
 import GlobeViewport from '../viewports/globe-viewport';
 import WebMercatorViewport from '../viewports/web-mercator-viewport';
-import GlobeController from '../controllers/globe-controller';
+import GlobeController, {
+  constrainGlobeViewState,
+  type GlobeLowZoomOrientationReset,
+  type GlobeMaxLatitude
+} from '../controllers/globe-controller';
 import type {Parameters} from '@luma.gl/core';
 
 const GLOBE_VIEW_DEFAULT_PARAMETERS: Parameters = {
@@ -19,6 +23,10 @@ export type GlobeViewState = {
   latitude: number;
   /** Zoom level */
   zoom: number;
+  /** Bearing in degrees */
+  bearing?: number;
+  /** Pitch in degrees */
+  pitch?: number;
   /** Min zoom, default `0` */
   minZoom?: number;
   /** Max zoom, default `20` */
@@ -38,6 +46,14 @@ export type GlobeViewProps = {
   farZMultiplier?: number;
   /** Distance of the camera relative to viewport height. Default `1.5`. */
   altitude?: number;
+  /** Maximum absolute latitude. May be a fixed number or zoom/maxLatitude stops. */
+  maxLatitude?: GlobeMaxLatitude;
+  /** If true, maxLatitude stops also define the minimum zoom needed at the current latitude. Default `true`. */
+  maxLatitudeZoomClamp?: boolean;
+  /** Absolute lower zoom bound for GlobeView after globe-specific zoom compensation. */
+  minGlobeZoom?: number;
+  /** Damp pitch and/or bearing back to zero while zoomed out. */
+  lowZoomOrientationReset?: GlobeLowZoomOrientationReset;
 } & CommonViewProps<GlobeViewState>;
 
 export default class GlobeView extends View<GlobeViewState, GlobeViewProps> {
@@ -55,6 +71,32 @@ export default class GlobeView extends View<GlobeViewState, GlobeViewProps> {
 
   getViewportType(viewState: GlobeViewState) {
     return viewState.zoom > 12 ? WebMercatorViewport : GlobeViewport;
+  }
+
+  filterViewState(viewState: GlobeViewState): GlobeViewState {
+    return constrainGlobeViewState(
+      super.filterViewState(viewState),
+      this.props.maxLatitude,
+      this.props.lowZoomOrientationReset,
+      this.props.maxLatitudeZoomClamp,
+      this.props.minGlobeZoom
+    );
+  }
+
+  get controller() {
+    const controller = super.controller;
+    if (!controller) {
+      return controller;
+    }
+
+    const {maxLatitude, maxLatitudeZoomClamp, minGlobeZoom, lowZoomOrientationReset} = this.props;
+    return {
+      ...controller,
+      ...(maxLatitude !== undefined ? {maxLatitude} : {}),
+      ...(maxLatitudeZoomClamp !== undefined ? {maxLatitudeZoomClamp} : {}),
+      ...(minGlobeZoom !== undefined ? {minGlobeZoom} : {}),
+      ...(lowZoomOrientationReset !== undefined ? {lowZoomOrientationReset} : {})
+    };
   }
 
   get ControllerType() {

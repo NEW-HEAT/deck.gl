@@ -32,6 +32,10 @@ const TAP_MAX_DISTANCE = 12;
 const DOUBLE_TAP_MAX_DELAY = 350;
 const DOUBLE_TAP_MAX_DISTANCE = 36;
 const DOUBLE_TAP_DRAG_PIXELS_PER_ZOOM = 128;
+// Cap how much the smoothed log-scale can change per pinch event. 0.18 log2
+// units is about a 1.13x zoom per frame, above intentional pinch rates but
+// low enough to swallow the spike from a single noisy final-lift frame.
+const MAX_PINCH_ZOOM_DELTA_PER_EVENT = 0.18;
 
 const EVENT_TYPES = {
   WHEEL: ['wheel'],
@@ -128,6 +132,10 @@ export type ViewStateChangeParameters<ViewStateT = any> = {
 }
 
 const pinchEventWorkaround: any = {};
+
+function clampPinchZoomDelta(delta: number): number {
+  return Math.max(-MAX_PINCH_ZOOM_DELTA_PER_EVENT, Math.min(MAX_PINCH_ZOOM_DELTA_PER_EVENT, delta));
+}
 
 type TapRecord = {
   pos: [number, number];
@@ -860,6 +868,7 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     // hack - hammer's `rotation` field doesn't seem to produce the correct angle
     pinchEventWorkaround._startPinchRotation = event.rotation;
     pinchEventWorkaround._lastPinchEvent = event;
+    pinchEventWorkaround._smoothedPinchScaleLog = 0;
     this.updateViewport(newControllerState, NO_TRANSITION_PROPS, {isDragging: true});
     return true;
   }
@@ -877,7 +886,14 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     if (this.touchZoom) {
       const {scale} = event;
       const pos = this.getCenter(event);
-      newControllerState = newControllerState.zoom({pos, scale});
+      // Apply the raw pinch scale in log space, clamped per event so a single
+      // noisy frame, especially on touch lift, cannot introduce a jump.
+      const rawScaleLog = Math.log2(scale);
+      const previousScaleLog = pinchEventWorkaround._smoothedPinchScaleLog ?? 0;
+      const smoothedScaleLog =
+        previousScaleLog + clampPinchZoomDelta(rawScaleLog - previousScaleLog);
+      pinchEventWorkaround._smoothedPinchScaleLog = smoothedScaleLog;
+      newControllerState = newControllerState.zoom({pos, scale: Math.pow(2, smoothedScaleLog)});
     }
     if (this.touchRotate) {
       const {rotation} = event;
@@ -947,6 +963,7 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     }
     pinchEventWorkaround._startPinchRotation = null;
     pinchEventWorkaround._lastPinchEvent = null;
+    pinchEventWorkaround._smoothedPinchScaleLog = null;
     return true;
   }
 

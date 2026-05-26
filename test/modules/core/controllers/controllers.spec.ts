@@ -35,6 +35,43 @@ test('MapController#inertia', async () => {
   });
 });
 
+test('MapController clamps a noisy final pinch frame instead of jumping', () => {
+  // Simulate a normal pinch ending with one sensor-noise spike. Without the
+  // per-event log-scale clamp the spike would propagate straight into the zoom.
+  const makePinchEvent = (type: string, scale: number, deltaTime: number) => ({
+    type,
+    offsetCenter: {x: 50, y: 50},
+    scale,
+    rotation: 0,
+    deltaTime,
+    srcEvent: {preventDefault() {}},
+    stopPropagation() {}
+  });
+
+  const controller = createTestController({
+    view: new MapView({controller: true}),
+    initialViewState: {
+      longitude: -122.45,
+      latitude: 37.78,
+      zoom: 10,
+      pitch: 30,
+      bearing: -45
+    }
+  });
+
+  controller.handleEvent(makePinchEvent('pinchstart', 1, 0) as any);
+  controller.handleEvent(makePinchEvent('pinchmove', 1.05, 16) as any);
+  controller.handleEvent(makePinchEvent('pinchmove', 1.1, 32) as any);
+  const zoomBeforeSpike = controller.props.zoom as number;
+  controller.handleEvent(makePinchEvent('pinchmove', 100, 48) as any);
+
+  const delta = (controller.props.zoom as number) - zoomBeforeSpike;
+  expect(
+    delta,
+    'noisy final pinch frame is clamped to the per-event log-scale cap'
+  ).toBeLessThanOrEqual(0.18 + 1e-6);
+});
+
 test('MapController skips pinch zoom inertia on touch lift', () => {
   // Touch pinches lift with a noisy final frame that can produce a large
   // synthetic velocity. The end zoom should equal the last live pinch zoom,
@@ -120,6 +157,93 @@ test('GlobeController supports pointer anchored zoom option', () => {
   expect(pointerZoomController.props.longitude, 'pointer zoom adjusts longitude').not.toBeCloseTo(
     0
   );
+});
+
+test('GlobeController eases low-zoom orientation back after releasing at friction limit', () => {
+  const view = new GlobeView({
+    controller: {
+      touchRotate: true,
+      lowZoomOrientationReset: {
+        zoomThreshold: 3.25,
+        zoomRange: 1.75,
+        maxBearing: 30,
+        maxPitch: 22,
+        hardMaxBearing: 75,
+        hardMaxPitch: 50,
+        friction: 0.18,
+        resetDuration: 220
+      }
+    }
+  });
+  const timeline = new Timeline();
+  let controllerProps = {
+    ...view.controller,
+    id: 'test-view',
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 100,
+    longitude: 0,
+    latitude: 0,
+    zoom: 1.5,
+    bearing: 0,
+    pitch: 0,
+    touchRotate: true,
+    inertia: 0
+  };
+  const ControllerClass = controllerProps.type;
+  const controller = new ControllerClass({
+    timeline,
+    onViewStateChange: ({viewState}) => {
+      controllerProps = {...controllerProps, ...viewState};
+      controller.setProps(controllerProps);
+    },
+    onStateChange() {},
+    makeViewport: viewState =>
+      view.makeViewport({
+        width: controllerProps.width,
+        height: controllerProps.height,
+        viewState
+      })
+  });
+  controller.setProps(controllerProps);
+  const makeEvent = (type: string, x = 50) =>
+    ({
+      type,
+      offsetCenter: {x, y: 50},
+      deltaX: x - 50,
+      deltaY: 0,
+      velocityY: 0,
+      srcEvent: {preventDefault() {}, metaKey: true},
+      stopPropagation() {}
+    }) as any;
+
+  controller.handleEvent(makeEvent('panstart'));
+  controller.handleEvent(makeEvent('panmove', 85));
+  const bearingAfterMove = controllerProps.bearing as number;
+  expect(Math.abs(bearingAfterMove), 'drag reaches the low-zoom friction band').toBeGreaterThan(30);
+
+  controller.handleEvent(makeEvent('panend', 85));
+  expect(
+    Math.abs(controllerProps.bearing as number),
+    'release starts from the friction-limited bearing instead of snapping'
+  ).toBeGreaterThan(30);
+
+  timeline.setTime(110);
+  controller.updateTransition();
+  expect(
+    Math.abs(controllerProps.bearing as number),
+    'reset transition eases away from the friction limit'
+  ).toBeLessThan(Math.abs(bearingAfterMove));
+  expect(
+    Math.abs(controllerProps.bearing as number),
+    'reset transition does not immediately snap to zero'
+  ).toBeGreaterThan(0);
+
+  timeline.setTime(220);
+  controller.updateTransition();
+  expect(controllerProps.bearing, 'reset finishes at zero bearing').toBeCloseTo(0);
+  expect(controllerProps.pitch, 'reset finishes at zero pitch').toBeCloseTo(0);
 });
 
 test('OrbitController', async () => {

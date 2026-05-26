@@ -165,6 +165,63 @@ test('GlobeView#parameters', () => {
   });
 });
 
+test('GlobeView#camera constraints', () => {
+  const view = new GlobeView({
+    controller: true,
+    maxLatitude: [
+      {zoom: 0, maxLatitude: 50},
+      {zoom: 4, maxLatitude: 80}
+    ],
+    maxLatitudeZoomClamp: true,
+    minGlobeZoom: 1.25,
+    lowZoomOrientationReset: {
+      zoomThreshold: 1,
+      zoomRange: 2,
+      maxBearing: 10,
+      maxPitch: 10,
+      friction: 0.18
+    }
+  });
+
+  const viewport = view.makeViewport({
+    width: 100,
+    height: 100,
+    viewState: {
+      longitude: 0,
+      latitude: 70,
+      zoom: 0,
+      bearing: 90,
+      pitch: 40
+    }
+  });
+
+  expect(view.controller, 'constraints are passed to the GlobeController').toMatchObject({
+    maxLatitude: [
+      {zoom: 0, maxLatitude: 50},
+      {zoom: 4, maxLatitude: 80}
+    ],
+    maxLatitudeZoomClamp: true,
+    minGlobeZoom: 1.25,
+    lowZoomOrientationReset: {zoomThreshold: 1, zoomRange: 2}
+  });
+  expect(viewport.latitude, 'viewport latitude is preserved by dynamic min zoom').toBe(70);
+  expect(viewport.zoom, 'viewport zoom is raised to permit the latitude').toBeCloseTo(2.6666667);
+
+  const lowZoomViewport = view.makeViewport({
+    width: 100,
+    height: 100,
+    viewState: {
+      longitude: 0,
+      latitude: 40,
+      zoom: 0,
+      bearing: 90,
+      pitch: 40
+    }
+  });
+  expect(lowZoomViewport.bearing, 'low zoom viewport bearing is resisted').toBeCloseTo(30.3898);
+  expect(lowZoomViewport.pitch, 'low zoom viewport pitch is resisted').toBeCloseTo(18.2188);
+});
+
 test('OrbitView', () => {
   const view = new OrbitView({id: '3d-view'});
   const viewport = view.makeViewport({
