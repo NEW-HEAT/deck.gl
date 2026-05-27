@@ -753,18 +753,18 @@ class GlobeState extends MapState {
     }
 
     const viewport = this.makeViewport(this.getViewportProps());
-    if (isGlobeViewport(viewport)) {
-      if (!viewport.isPointOnGlobe(pos)) {
-        return undefined;
-      }
+    if (!isGlobeViewport(viewport)) {
       const lngLat = viewport.unproject(pos);
-      return [lngLat[0], lngLat[1]];
+      return Number.isFinite(lngLat[0]) && Number.isFinite(lngLat[1])
+        ? [lngLat[0], lngLat[1]]
+        : undefined;
     }
 
+    if (!isGlobeViewport(viewport) || !viewport.isPointOnGlobe(pos)) {
+      return undefined;
+    }
     const lngLat = viewport.unproject(pos);
-    return Number.isFinite(lngLat[0]) && Number.isFinite(lngLat[1])
-      ? [lngLat[0], lngLat[1]]
-      : undefined;
+    return [lngLat[0], lngLat[1]];
   }
 
   private _shouldZoomAroundPointer(): boolean {
