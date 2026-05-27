@@ -116,7 +116,7 @@ test('Deck#constructor', async () => {
   console.log('Deck constructor did not throw');
 });
 
-test('Deck wires mjolnir requireFailure between recognizers', async () => {
+test('Deck wires mjolnir simultaneous and requireFailure recognizers', async () => {
   // Regression guard: deck.gl previously emitted `requestFailure` instead of
   // `requireFailure`, which mjolnir silently dropped.
   await new Promise<void>((resolve, reject) => {
@@ -134,8 +134,15 @@ test('Deck wires mjolnir requireFailure between recognizers', async () => {
             (recognizers.find(r => r.options.event === event)?.requireFail ?? []).map(
               (r: any) => r.options.event
             );
+          const simultaneous = (event: string): string[] =>
+            Object.values(recognizers.find(r => r.options.event === event)?.simultaneous ?? {}).map(
+              (r: any) => r.options.event
+            );
 
-          expect(requiredFailures('pinch'), 'pinch waits for multipan').toContain('multipan');
+          expect(simultaneous('pinch'), 'pinch can recognize with multipan').toContain('multipan');
+          expect(requiredFailures('pinch'), 'pinch does not wait for multipan').not.toContain(
+            'multipan'
+          );
           expect(requiredFailures('pan'), 'pan waits for multipan').toContain('multipan');
           expect(requiredFailures('click'), 'click waits for dblclick').toContain('dblclick');
 

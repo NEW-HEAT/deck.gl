@@ -10,7 +10,9 @@ import {
   OrbitView,
   OrthographicView,
   FirstPersonView,
-  _GlobeView as GlobeView
+  WebMercatorViewport,
+  _GlobeView as GlobeView,
+  _GlobeViewport as GlobeViewport
 } from 'deck.gl';
 import {equals} from '@math.gl/core';
 
@@ -163,6 +165,31 @@ test('GlobeView#parameters', () => {
   expect(customView.props.parameters, 'GlobeView culling can be overridden').toMatchObject({
     cullMode: 'none'
   });
+});
+
+test('GlobeView switches to WebMercatorViewport at close zooms', () => {
+  const view = new GlobeView();
+  const baseViewState = {
+    longitude: -122.4,
+    latitude: 37.8,
+    bearing: 0,
+    pitch: 0
+  };
+  const lowZoomViewport = view.makeViewport({
+    width: 100,
+    height: 100,
+    viewState: {...baseViewState, zoom: 12}
+  });
+  const closeZoomViewport = view.makeViewport({
+    width: 100,
+    height: 100,
+    viewState: {...baseViewState, zoom: 12.01}
+  });
+
+  expect(lowZoomViewport, 'zoom 12 still uses globe rendering').toBeInstanceOf(GlobeViewport);
+  expect(closeZoomViewport, 'close zoom uses cheaper Mercator rendering').toBeInstanceOf(
+    WebMercatorViewport
+  );
 });
 
 test('GlobeView#camera constraints', () => {

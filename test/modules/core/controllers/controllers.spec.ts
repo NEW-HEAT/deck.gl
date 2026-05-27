@@ -115,6 +115,59 @@ test('MapController skips pinch zoom inertia on touch lift', () => {
   ).toBeCloseTo(zoomAfterMove);
 });
 
+test('MapController allows pinch zoom and two-finger rotate in one gesture', () => {
+  const makePinchEvent = (type: string, scale: number, rotation: number) =>
+    ({
+      type,
+      offsetCenter: {x: 50, y: 80},
+      scale,
+      rotation,
+      deltaTime: 16,
+      srcEvent: {preventDefault() {}},
+      stopPropagation() {}
+    }) as any;
+  const makeMultiPanEvent = (type: string, y: number) =>
+    ({
+      type,
+      offsetCenter: {x: 50, y},
+      deltaX: 0,
+      deltaY: y - 50,
+      velocityY: 0,
+      srcEvent: {preventDefault() {}},
+      stopPropagation() {}
+    }) as any;
+
+  const controller = createTestController({
+    view: new MapView({
+      controller: {
+        touchZoom: true,
+        touchRotate: true
+      }
+    }),
+    initialViewState: {
+      longitude: -122.45,
+      latitude: 37.78,
+      zoom: 10,
+      pitch: 0,
+      bearing: 0
+    }
+  });
+
+  controller.handleEvent(makePinchEvent('pinchstart', 1, 0));
+  controller.handleEvent(makeMultiPanEvent('multipanstart', 50));
+  controller.handleEvent(makeMultiPanEvent('multipanmove', 80));
+  const pitchAfterMultiPan = controller.props.pitch as number;
+
+  controller.handleEvent(makePinchEvent('pinchmove', 1.25, 15));
+
+  expect(controller.props.zoom, 'pinch zoom still applies during touch rotate').toBeGreaterThan(10);
+  expect(controller.props.bearing, 'pinch rotation still applies during zoom').not.toBeCloseTo(0);
+  expect(
+    controller.props.pitch,
+    'pinch update preserves pitch from simultaneous multipan'
+  ).toBeCloseTo(pitchAfterMultiPan);
+});
+
 test('GlobeController', async () => {
   await testController(
     GlobeView,

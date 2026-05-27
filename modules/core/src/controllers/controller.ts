@@ -897,8 +897,15 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     }
     if (this.touchRotate) {
       const {rotation} = event;
+      const {startPitch} = newControllerState.getState();
+      const currentPitch = newControllerState.getViewportProps().pitch;
+      const deltaAngleY =
+        typeof startPitch === 'number' && typeof currentPitch === 'number'
+          ? currentPitch - startPitch
+          : 0;
       newControllerState = newControllerState.rotate({
-        deltaAngleX: pinchEventWorkaround._startPinchRotation - rotation
+        deltaAngleX: pinchEventWorkaround._startPinchRotation - rotation,
+        deltaAngleY
       });
     }
 
