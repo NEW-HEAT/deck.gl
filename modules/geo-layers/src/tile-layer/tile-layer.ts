@@ -35,6 +35,7 @@ const defaultProps: DefaultProps<TileLayerProps> = {
   data: {type: 'data', value: []},
   dataComparator: urlType.equal,
   renderSubLayers: {type: 'function', value: (props: any) => new GeoJsonLayer(props)},
+  renderPlaceholderSubLayers: {type: 'function', optional: true, value: null},
   getTileData: {type: 'function', optional: true, value: null},
   // TODO - change to onViewportLoad to align with Tile3DLayer
   onViewportLoad: {type: 'function', optional: true, value: null},
@@ -81,6 +82,18 @@ type _TileLayerProps<DataT> = {
       tile: Tile2DHeader<DataT>;
     }
   ) => Layer | null | LayersList;
+  /**
+   * Optionally renders one or more placeholder layers while a selected tile is still loading.
+   * This prevents base-map holes from exposing the scene background during network gaps.
+   */
+  renderPlaceholderSubLayers?: ((
+    props: TileLayerProps<DataT> & {
+      id: string;
+      data: DataT | null;
+      _offset: number;
+      tile: Tile2DHeader<DataT>;
+    }
+  ) => Layer | null | LayersList) | null;
   /**
    * If supplied, `getTileData` is called to retrieve the data of each tile.
    */
@@ -384,6 +397,17 @@ export default class TileLayer<DataT = any, ExtraPropsT extends {} = {}> extends
     return this.props.renderSubLayers(props);
   }
 
+  renderPlaceholderSubLayers(
+    props: TileLayer['props'] & {
+      id: string;
+      data: DataT | null;
+      _offset: number;
+      tile: Tile2DHeader<DataT>;
+    }
+  ): Layer | null | LayersList {
+    return this.props.renderPlaceholderSubLayers?.(props) ?? null;
+  }
+
   getSubLayerPropsByTile(tile: Tile2DHeader): Partial<LayerProps> | null {
     return null;
   }
@@ -423,7 +447,26 @@ export default class TileLayer<DataT = any, ExtraPropsT extends {} = {}> extends
       const subLayerProps = this.getSubLayerPropsByTile(tile);
       // cache the rendered layer in the tile
       if (!tile.isLoaded && !tile.content) {
-        // nothing to show
+        if (!tile.layers) {
+          const layers = this.renderPlaceholderSubLayers({
+            ...this.props,
+            ...this.getSubLayerProps({
+              id: tile.id,
+              updateTriggers: this.props.updateTriggers
+            }),
+            data: null,
+            _offset: 0,
+            tile
+          });
+          tile.layers = (flatten(layers, Boolean) as Layer<{tile?: Tile2DHeader}>[]).map(layer => {
+            const globeBitmapProps = this._getGlobeBitmapLayerProps(layer);
+            return layer.clone({
+              tile,
+              ...globeBitmapProps,
+              ...subLayerProps
+            });
+          });
+        }
       } else if (!tile.layers) {
         const layers = this.renderSubLayers({
           ...this.props,
