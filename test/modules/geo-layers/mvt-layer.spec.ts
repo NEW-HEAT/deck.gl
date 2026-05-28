@@ -470,6 +470,67 @@ test('MVTLayer#core.worker false disables workers', async () => {
   });
 });
 
+test('MVTLayer#loadOptions.mvt.coordinates override controls loading and rendering', async () => {
+  let capturedLoadOptions;
+  let capturedSubLayerProps;
+
+  class TestMVTLayer extends MVTLayer {
+    renderSubLayers(props) {
+      capturedSubLayerProps = props;
+      return new GeoJsonLayer(props);
+    }
+  }
+
+  const viewport = new WebMercatorViewport({
+    width: 100,
+    height: 100,
+    longitude: 0,
+    latitude: 60,
+    zoom: 3
+  });
+
+  const testCases = [
+    {
+      props: {
+        data: ['https://server.com/{z}/{x}/{y}.mvt'],
+        binary: false,
+        loaders: [MVTLoader],
+        fetch: (url, {loadOptions}) => {
+          capturedLoadOptions = loadOptions;
+          return Promise.resolve([]);
+        },
+        loadOptions: {
+          mvt: {
+            coordinates: 'wgs84'
+          }
+        }
+      },
+      onAfterUpdate: ({layer}) => {
+        if (layer.isLoaded && capturedSubLayerProps) {
+          expect(capturedLoadOptions.mvt.coordinates, 'coordinates override is preserved').toBe(
+            'wgs84'
+          );
+          expect(
+            capturedSubLayerProps.modelMatrix,
+            'WGS84 tiles do not use local transform'
+          ).toBeFalsy();
+          expect(
+            capturedSubLayerProps.coordinateSystem,
+            'WGS84 tiles use the layer default coordinate system'
+          ).toBe('default');
+        }
+      }
+    }
+  ];
+
+  await testLayerAsync({
+    Layer: TestMVTLayer,
+    viewport,
+    testCases,
+    onError: err => expect(err).toBeFalsy()
+  });
+});
+
 test('MVTLayer#dataInWGS84', async () => {
   class TestMVTLayer extends MVTLayer {
     getTileData() {

@@ -190,6 +190,34 @@ test('GlobeView switches to WebMercatorViewport at close zooms', () => {
   expect(closeZoomViewport, 'close zoom uses cheaper Mercator rendering').toBeInstanceOf(
     WebMercatorViewport
   );
+
+  const deferredFallbackView = new GlobeView({webMercatorFallbackZoom: 14.5});
+  expect(
+    deferredFallbackView.makeViewport({
+      width: 100,
+      height: 100,
+      viewState: {...baseViewState, zoom: 14}
+    }),
+    'custom fallback threshold keeps close fly-to zooms on the globe'
+  ).toBeInstanceOf(GlobeViewport);
+  expect(
+    deferredFallbackView.makeViewport({
+      width: 100,
+      height: 100,
+      viewState: {...baseViewState, zoom: 14.6}
+    }),
+    'custom fallback threshold still switches to Mercator past the threshold'
+  ).toBeInstanceOf(WebMercatorViewport);
+
+  const globeOnlyView = new GlobeView({webMercatorFallbackZoom: null});
+  expect(
+    globeOnlyView.makeViewport({
+      width: 100,
+      height: 100,
+      viewState: {...baseViewState, zoom: 20}
+    }),
+    'null fallback threshold keeps GlobeViewport at every zoom'
+  ).toBeInstanceOf(GlobeViewport);
 });
 
 test('GlobeView#camera constraints', () => {

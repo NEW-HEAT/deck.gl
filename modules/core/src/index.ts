@@ -79,6 +79,7 @@ export {TRANSITION_EVENTS} from './controllers/transition-manager';
 export {default as TransitionInterpolator} from './transitions/transition-interpolator';
 export {default as LinearInterpolator} from './transitions/linear-interpolator';
 export {default as FlyToInterpolator} from './transitions/fly-to-interpolator';
+export {default as _GlobeFlyToInterpolator} from './transitions/globe-fly-to-interpolator';
 
 // Layer utilities
 export {default as log} from './utils/log';

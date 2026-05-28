@@ -65,6 +65,7 @@ export type TileJson = {
 };
 
 type ParsedMvtTile = Feature[] | BinaryFeatureCollection;
+type MVTCoordinates = 'local' | 'wgs84';
 
 export type MVTLayerPickingInfo<FeaturePropertiesT = {}> = TileLayerPickingInfo<
   ParsedMvtTile,
@@ -217,6 +218,7 @@ export default class MVTLayer<
   getTileData(loadProps: TileLoadProps): Promise<ParsedMvtTile> {
     const {data, binary} = this.state;
     const {index, signal} = loadProps;
+    const coordinates = this._getMVTCoordinates();
 
     const url = getURLFromTemplate(data, loadProps);
     if (!url) {
@@ -233,7 +235,7 @@ export default class MVTLayer<
       mvt: {
         ...loadOptions?.mvt,
         shape: binary ? 'binary' : 'geojson',
-        coordinates: this.context.viewport.resolution ? 'wgs84' : 'local',
+        coordinates,
         tileIndex: index
         // Local worker debug
         // workerUrl: `modules/mvt/dist/mvt-loader.worker.js`
@@ -265,7 +267,7 @@ export default class MVTLayer<
 
     props.autoHighlight = false;
 
-    if (!this.context.viewport.resolution) {
+    if (!this._isWGS84()) {
       props.modelMatrix = modelMatrix;
       props.coordinateOrigin = [xOffset, yOffset, 0];
       props.coordinateSystem = COORDINATE_SYSTEM.CARTESIAN;
@@ -311,7 +313,15 @@ export default class MVTLayer<
   }
 
   protected _isWGS84(): boolean {
-    return Boolean(this.context.viewport.resolution);
+    return this._getMVTCoordinates() === 'wgs84';
+  }
+
+  private _getMVTCoordinates(): MVTCoordinates {
+    const coordinates = this.getLoadOptions()?.mvt?.coordinates;
+    if (coordinates === 'local' || coordinates === 'wgs84') {
+      return coordinates;
+    }
+    return this.context.viewport.resolution ? 'wgs84' : 'local';
   }
 
   getPickingInfo(params: GetPickingInfoParams): MVTLayerPickingInfo<FeaturePropertiesT> {
@@ -436,9 +446,11 @@ export default class MVTLayer<
               // Create a cache to transform only once
 
               const content = this.state.binary ? binaryToGeojson(tile.content) : tile.content;
-              tile._contentWGS84 = content.map(feature =>
-                transformTileCoordsToWGS84(feature, bbox, this.context.viewport)
-              );
+              tile._contentWGS84 = this._isWGS84()
+                ? content
+                : content.map(feature =>
+                    transformTileCoordsToWGS84(feature, bbox, this.context.viewport)
+                  );
             }
             return tile._contentWGS84;
           }

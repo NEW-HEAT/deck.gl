@@ -108,11 +108,11 @@ test('Tileset2D#getRequestPriority ranks tiles by viewport coverage', () => {
     isPrefetch: true
   };
 
+  expect((tileset as any)._getRequestPriority(prefetchAtCenter)).toBeLessThan(
+    (tileset as any)._getRequestPriority(selectedAtCenterEdge)
+  );
   expect((tileset as any)._getRequestPriority(selectedAtCenterEdge)).toBeLessThan(
     (tileset as any)._getRequestPriority(selectedNearCenter)
-  );
-  expect((tileset as any)._getRequestPriority(selectedNearCenter)).toBeLessThan(
-    (tileset as any)._getRequestPriority(prefetchAtCenter)
   );
 
   tileset.finalize();

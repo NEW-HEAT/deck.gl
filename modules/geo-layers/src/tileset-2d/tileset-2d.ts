@@ -53,9 +53,10 @@ export type LODStrategy = 'none' | 'coverage';
 const DEFAULT_CACHE_SCALE = 5;
 const COVERAGE_ZOOM_DELTA = 2;
 const MIN_COVERAGE_ZOOM = 4;
+const PREFETCH_TILE_PRIORITY = -1e8;
+const PREFETCH_ZOOM_PRIORITY = 1e6;
 const SELECTED_TILE_PRIORITY = 0;
 const VISIBLE_TILE_PRIORITY = 1e8;
-const PREFETCH_TILE_PRIORITY = 2e8;
 
 const STRATEGIES = {
   [STRATEGY_DEFAULT]: updateTileStateDefault,
@@ -467,7 +468,7 @@ export class Tileset2D {
     }
     if (tile.isPrefetch) {
       return (
-        PREFETCH_TILE_PRIORITY + this.getTileZoom(tile.index) * PREFETCH_TILE_PRIORITY + distance
+        PREFETCH_TILE_PRIORITY + this.getTileZoom(tile.index) * PREFETCH_ZOOM_PRIORITY + distance
       );
     }
     return -1;

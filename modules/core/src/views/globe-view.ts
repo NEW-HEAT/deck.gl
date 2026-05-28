@@ -40,6 +40,8 @@ export type GlobeViewState = {
 export type GlobeViewProps = {
   /** The resolution at which to turn flat features into 3D meshes, in degrees. Smaller numbers will generate more detailed mesh. Default `10`. */
   resolution?: number;
+  /** Zoom above which GlobeView uses WebMercatorViewport for cheaper close-range rendering. Set to null to always use GlobeViewport. Default `12`. */
+  webMercatorFallbackZoom?: number | null;
   /** Scaler for the near plane, 1 unit equals to the height of the viewport. Default to `0.1`. Overwrites the `near` parameter. */
   nearZMultiplier?: number;
   /** Scaler for the far plane, 1 unit equals to the distance from the camera to the top edge of the screen. Default to `1.01`. Overwrites the `far` parameter. */
@@ -70,7 +72,14 @@ export default class GlobeView extends View<GlobeViewState, GlobeViewProps> {
   }
 
   getViewportType(viewState: GlobeViewState) {
-    return viewState.zoom > 12 ? WebMercatorViewport : GlobeViewport;
+    const fallbackZoom = this.props.webMercatorFallbackZoom;
+    if (fallbackZoom === null) {
+      return GlobeViewport;
+    }
+    const switchZoom = fallbackZoom ?? 12;
+    return Number.isFinite(switchZoom) && viewState.zoom > switchZoom
+      ? WebMercatorViewport
+      : GlobeViewport;
   }
 
   filterViewState(viewState: GlobeViewState): GlobeViewState {
