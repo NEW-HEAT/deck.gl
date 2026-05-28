@@ -20,6 +20,28 @@ const LINEARLY_INTERPOLATED_PROPS = {
   position: [0, 0, 0]
 };
 
+type FlyToViewportProps = {
+  width: number;
+  height: number;
+  longitude: number;
+  latitude: number;
+  zoom: number;
+  bearing?: number;
+  pitch?: number;
+};
+
+function getFlyToViewportProps(props: Record<string, any>): FlyToViewportProps {
+  return {
+    width: props.width,
+    height: props.height,
+    longitude: props.longitude,
+    latitude: props.latitude,
+    zoom: props.zoom,
+    bearing: props.bearing,
+    pitch: props.pitch
+  };
+}
+
 function normalizeAngle(value: number): number {
   return ((((value + 180) % 360) + 360) % 360) - 180;
 }
@@ -118,7 +140,12 @@ export default class GlobeFlyToInterpolator extends TransitionInterpolator {
     const startPosition = Globe.toPosition(startProps.longitude, startProps.latitude);
     const endPosition = Globe.toPosition(endProps.longitude, endProps.latitude);
     const [longitude, latitude] = Globe.toLngLat(slerpPosition(startPosition, endPosition, t));
-    const flyTo = flyToViewport(startProps, endProps, t, this.opts);
+    const flyTo = flyToViewport(
+      getFlyToViewportProps(startProps),
+      getFlyToViewportProps(endProps),
+      t,
+      this.opts
+    );
     const flyToScaleZoom = flyTo.zoom - zoomAdjust(flyTo.latitude, true);
     const zoom = flyToScaleZoom + zoomAdjust(latitude, true);
 
@@ -148,7 +175,11 @@ export default class GlobeFlyToInterpolator extends TransitionInterpolator {
       return transitionDuration;
     }
 
-    transitionDuration = getFlyToDuration(startProps, endProps, this.opts);
+    transitionDuration = getFlyToDuration(
+      getFlyToViewportProps(startProps),
+      getFlyToViewportProps(endProps),
+      this.opts
+    );
     if (transitionDuration === 0) {
       return 0;
     }
