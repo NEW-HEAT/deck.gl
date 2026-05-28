@@ -56,18 +56,40 @@ export default class TripsLayer<DataT = any, ExtraProps extends {} = {}> extends
 in float instanceTimestamps;
 in float instanceNextTimestamps;
 out float vTime;
+out float vTimeStart;
+out float vTimeEnd;
 `,
       // Timestamp of the vertex
       'vs:#main-end': `\
 vTime = instanceTimestamps + (instanceNextTimestamps - instanceTimestamps) * vPathPosition.y / vPathLength;
+vTimeStart = instanceTimestamps;
+vTimeEnd = instanceNextTimestamps;
 `,
       'fs:#decl': `\
 in float vTime;
+in float vTimeStart;
+in float vTimeEnd;
 `,
       // Drop the segments outside of the time window
       'fs:#main-start': `\
-if(vTime > trips.currentTime || (trips.fadeTrail && (vTime < trips.currentTime - trips.trailLength))) {
+bool isAfterHead = vTime > trips.currentTime;
+bool isBeforeTrail = trips.fadeTrail && (vTime < trips.currentTime - trips.trailLength);
+if (isBeforeTrail) {
   discard;
+}
+if (isAfterHead) {
+  float segmentDuration = vTimeEnd - vTimeStart;
+  bool currentTimeCutsSegment = abs(segmentDuration) > 0.000001 &&
+    trips.currentTime >= min(vTimeStart, vTimeEnd) &&
+    trips.currentTime <= max(vTimeStart, vTimeEnd);
+  if (!currentTimeCutsSegment || path.capType < 0.5) {
+    discard;
+  }
+
+  float headPosition = (trips.currentTime - vTimeStart) / segmentDuration * vPathLength;
+  if (length(vec2(vPathPosition.x, vPathPosition.y - headPosition)) > 1.0) {
+    discard;
+  }
 }
 `,
       // Fade the color (currentTime - 100%, end of trail - 0%)
