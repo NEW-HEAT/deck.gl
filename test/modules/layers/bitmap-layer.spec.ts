@@ -159,6 +159,35 @@ test('BitmapLayer#imageCoordinateSystem', () => {
   });
 });
 
+test('BitmapLayer#updateState recreates missing model before bounds update', () => {
+  testLayer({
+    Layer: BitmapLayer,
+    onError: err => expect(err).toBeFalsy(),
+    testCases: [
+      {
+        props: {
+          id: 'missing-model',
+          bounds: [0, 0, 1, 1]
+        },
+        onAfterUpdate({layer}) {
+          expect(layer.state.model, 'model initialized').toBeTruthy();
+          layer.state.model?.destroy();
+          layer.setState({model: undefined});
+        }
+      },
+      {
+        updateProps: {
+          bounds: [0, 0, 2, 2]
+        },
+        onAfterUpdate({layer}) {
+          expect(layer.state.model, 'model recreated').toBeTruthy();
+          expect(layer.state.model.vertexCount, 'vertex count updated').toBe(6);
+        }
+      }
+    ]
+  });
+});
+
 test('createMesh', () => {
   const bounds = [
     [0, 0, 0],
