@@ -188,6 +188,39 @@ test('BitmapLayer#updateState recreates missing model before bounds update', () 
   });
 });
 
+test('BitmapLayer#updateState skips missing attribute manager', () => {
+  let attributeManager;
+
+  testLayer({
+    Layer: BitmapLayer,
+    onError: err => expect(err).toBeFalsy(),
+    testCases: [
+      {
+        props: {
+          id: 'missing-attribute-manager',
+          bounds: [0, 0, 1, 1]
+        },
+        onAfterUpdate({layer}) {
+          expect(layer.state.model, 'model initialized').toBeTruthy();
+          attributeManager = layer.internalState!.attributeManager;
+          layer.state.model?.destroy();
+          layer.setState({model: undefined});
+          layer.internalState!.attributeManager = null;
+        }
+      },
+      {
+        updateProps: {
+          bounds: [0, 0, 2, 2]
+        },
+        onAfterUpdate({layer}) {
+          expect(layer.state.model, 'model remains unset without attributes').toBeFalsy();
+          layer.internalState!.attributeManager = attributeManager;
+        }
+      }
+    ]
+  });
+});
+
 test('createMesh', () => {
   const bounds = [
     [0, 0, 0],

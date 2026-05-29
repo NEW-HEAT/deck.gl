@@ -133,7 +133,10 @@ export default class BitmapLayer<ExtraPropsT extends {} = {}> extends Layer<
   }
 
   initializeState() {
-    const attributeManager = this.getAttributeManager()!;
+    const attributeManager = this.getAttributeManager();
+    if (!attributeManager) {
+      return;
+    }
 
     const noAlloc = true;
 
@@ -161,11 +164,14 @@ export default class BitmapLayer<ExtraPropsT extends {} = {}> extends Layer<
 
   updateState({props, oldProps, changeFlags}: UpdateParameters<this>): void {
     // setup model first
-    const attributeManager = this.getAttributeManager()!;
+    const attributeManager = this.getAttributeManager();
+    if (!attributeManager) {
+      return;
+    }
 
     if (changeFlags.extensionsChanged || !this.state.model) {
       this.state.model?.destroy();
-      this.state.model = this._getModel();
+      this.state.model = this._getModel(attributeManager);
       attributeManager.invalidateAll();
     }
 
@@ -250,7 +256,7 @@ export default class BitmapLayer<ExtraPropsT extends {} = {}> extends Layer<
     return createMesh(normalizedBounds, this.context.viewport.resolution);
   }
 
-  protected _getModel(): Model {
+  protected _getModel(attributeManager = this.getAttributeManager()!): Model {
     /*
       0,0 --- 1,0
        |       |
@@ -259,7 +265,7 @@ export default class BitmapLayer<ExtraPropsT extends {} = {}> extends Layer<
     return new Model(this.context.device, {
       ...this.getShaders(),
       id: this.props.id,
-      bufferLayout: this.getAttributeManager()!.getBufferLayouts(),
+      bufferLayout: attributeManager.getBufferLayouts(),
       topology: 'triangle-list',
       isInstanced: false
     });
