@@ -73,6 +73,28 @@ test('Tileset2D#update with coverage LOD', () => {
   tileset.finalize();
 });
 
+test('Tileset2D#update with edge tile prefetch', () => {
+  const tileset = new Tileset2D({
+    getTileData,
+    prefetchTileRadius: 1,
+    onTileLoad: () => {}
+  });
+  tileset.update(testViewport);
+
+  const selected = tileset._cache.get('1171-1566-12');
+  const neighbor = tileset._cache.get('1172-1566-12');
+
+  expect(selected?.isSelected, 'target tile remains selected').toBe(true);
+  expect(neighbor?.isSelected, 'neighbor tile is not selected').toBe(false);
+  expect(neighbor?.isPrefetch, 'neighbor tile is prefetched').toBe(true);
+  expect(neighbor?.isCoveragePrefetch, 'neighbor tile is not coverage prefetch').toBe(false);
+  expect((tileset as any)._getRequestPriority(selected)).toBeLessThan(
+    (tileset as any)._getRequestPriority(neighbor)
+  );
+
+  tileset.finalize();
+});
+
 test('Tileset2D#getRequestPriority ranks tiles by viewport coverage', () => {
   const tileset = new Tileset2D({
     getTileData,
@@ -105,12 +127,14 @@ test('Tileset2D#getRequestPriority ranks tiles by viewport coverage', () => {
     index: {x: 0, y: 0, z: 8},
     isSelected: false,
     isVisible: false,
-    isPrefetch: true
+    isPrefetch: true,
+    isCoveragePrefetch: true
   };
 
   expect((tileset as any)._getRequestPriority(prefetchAtCenter)).toBeLessThan(
     (tileset as any)._getRequestPriority(selectedAtCenterEdge)
   );
+  expect((tileset as any)._getRequestPriority(prefetchAtCenter)).toBeGreaterThanOrEqual(0);
   expect((tileset as any)._getRequestPriority(selectedAtCenterEdge)).toBeLessThan(
     (tileset as any)._getRequestPriority(selectedNearCenter)
   );

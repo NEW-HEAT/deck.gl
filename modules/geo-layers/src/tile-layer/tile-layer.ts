@@ -55,6 +55,7 @@ const defaultProps: DefaultProps<TileLayerProps> = {
   maxRequests: 6,
   debounceTime: 0,
   zoomOffset: 0,
+  prefetchTileRadius: 0,
   visibleMinZoom: null,
   visibleMaxZoom: null
 };
@@ -179,6 +180,13 @@ type _TileLayerProps<DataT> = {
   zoomOffset?: number;
 
   /**
+   * Number of same-zoom neighbor tiles to prefetch around selected tiles.
+   *
+   * @default 0
+   */
+  prefetchTileRadius?: number;
+
+  /**
    * The minimum zoom level at which tiles are visible.
    * When the viewport zoom is below this level, no tiles are rendered.
    *
@@ -294,6 +302,7 @@ export default class TileLayer<DataT = any, ExtraPropsT extends {} = {}> extends
       maxRequests,
       debounceTime,
       zoomOffset,
+      prefetchTileRadius,
       visibleMinZoom,
       visibleMaxZoom
     } = this.props;
@@ -310,6 +319,7 @@ export default class TileLayer<DataT = any, ExtraPropsT extends {} = {}> extends
       maxRequests,
       debounceTime,
       zoomOffset,
+      prefetchTileRadius,
       visibleMinZoom,
       visibleMaxZoom,
 
