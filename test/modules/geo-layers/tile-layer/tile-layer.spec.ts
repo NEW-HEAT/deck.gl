@@ -327,6 +327,63 @@ test('TileLayer#error tiles do not block isLoaded', async () => {
   expect(tileErrorCalled, 'onTileError is called for failed tiles').toBe(2);
 });
 
+test('TileLayer#placeholder sublayers are replaced by loaded content', async () => {
+  let sawPlaceholder = false;
+  let sawLoadedContent = false;
+
+  await testLayerAsync({
+    Layer: TileLayer,
+    viewport: new WebMercatorViewport({
+      width: 100,
+      height: 100,
+      longitude: 0,
+      latitude: 0,
+      zoom: 2
+    }),
+    testCases: [
+      {
+        title: 'placeholder is not cached as tile content',
+        props: {
+          getTileData: () =>
+            new Promise(resolve => setTimeout(() => resolve([{position: [0, 0]}]), 20)),
+          renderPlaceholderSubLayers: props =>
+            new ScatterplotLayer(props, {
+              id: `${props.id}-placeholder`,
+              data: [{position: [0, 0]}],
+              getPosition: d => d.position
+            }),
+          renderSubLayers: props =>
+            new ScatterplotLayer(props, {
+              id: `${props.id}-content`,
+              data: props.data,
+              getPosition: d => d.position
+            })
+        },
+        onAfterUpdate: ({layer, subLayers}) => {
+          if (!layer.isLoaded && subLayers.length > 0) {
+            sawPlaceholder = true;
+            expect(
+              subLayers.every(l => l.id.includes('placeholder')),
+              'Only placeholder sublayers are shown while loading'
+            ).toBeTruthy();
+          }
+          if (layer.isLoaded) {
+            sawLoadedContent = true;
+            expect(
+              subLayers.every(l => l.id.includes('content')),
+              'Loaded content replaces placeholder sublayers'
+            ).toBeTruthy();
+          }
+        }
+      }
+    ],
+    onError: err => expect(err).toBeFalsy()
+  });
+
+  expect(sawPlaceholder, 'Placeholder sublayers rendered while loading').toBeTruthy();
+  expect(sawLoadedContent, 'Loaded sublayers rendered after tile data resolves').toBeTruthy();
+});
+
 test('TileLayer#AbortRequestsOnUpdateTrigger', async () => {
   const testViewport = new WebMercatorViewport({
     width: 1200,
