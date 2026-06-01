@@ -168,6 +168,84 @@ test('MapController allows pinch zoom and two-finger rotate in one gesture', () 
   ).toBeCloseTo(pitchAfterMultiPan);
 });
 
+test('MapController pitches live from touch pinch centroid movement', () => {
+  const makePinchEvent = (type: string, y: number, scale = 1, rotation = 0) =>
+    ({
+      type,
+      offsetCenter: {x: 50, y},
+      scale,
+      rotation,
+      deltaTime: 16,
+      srcEvent: {preventDefault() {}, pointerType: 'touch'},
+      stopPropagation() {}
+    }) as any;
+
+  const controller = createTestController({
+    view: new MapView({
+      controller: {
+        touchZoom: true,
+        touchRotate: true
+      }
+    }),
+    initialViewState: {
+      longitude: -122.45,
+      latitude: 37.78,
+      zoom: 10,
+      pitch: 0,
+      bearing: 0
+    }
+  });
+
+  controller.handleEvent(makePinchEvent('pinchstart', 80));
+  controller.handleEvent(makePinchEvent('pinchmove', 40));
+
+  expect(
+    controller.props.pitch,
+    'two-finger vertical drag pitches during the gesture'
+  ).toBeGreaterThan(0);
+  expect(controller.props.zoom, 'parallel touch pitch does not zoom-anchor pan').toBeCloseTo(10);
+});
+
+test('MapController does not apply touch pitch inertia on lift', () => {
+  const makeMultiPanEvent = (type: string, y: number, velocityY = 0) =>
+    ({
+      type,
+      offsetCenter: {x: 50, y},
+      deltaX: 0,
+      deltaY: y - 80,
+      velocityY,
+      srcEvent: {preventDefault() {}, pointerType: 'touch'},
+      stopPropagation() {}
+    }) as any;
+
+  const controller = createTestController({
+    view: new MapView({
+      controller: {
+        touchRotate: true,
+        inertia: 300
+      }
+    }),
+    initialViewState: {
+      longitude: -122.45,
+      latitude: 37.78,
+      zoom: 10,
+      pitch: 0,
+      bearing: 0
+    }
+  });
+
+  controller.handleEvent(makeMultiPanEvent('multipanstart', 80));
+  controller.handleEvent(makeMultiPanEvent('multipanmove', 40));
+  const pitchAfterMove = controller.props.pitch as number;
+
+  controller.handleEvent(makeMultiPanEvent('multipanend', 40, -1));
+
+  expect(
+    controller.props.pitch,
+    'lift does not project touch pitch beyond the last live frame'
+  ).toBeCloseTo(pitchAfterMove);
+});
+
 test('GlobeController', async () => {
   await testController(
     GlobeView,

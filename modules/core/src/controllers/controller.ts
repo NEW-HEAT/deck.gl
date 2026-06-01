@@ -32,6 +32,8 @@ const TAP_MAX_DISTANCE = 12;
 const DOUBLE_TAP_MAX_DELAY = 350;
 const DOUBLE_TAP_MAX_DISTANCE = 36;
 const DOUBLE_TAP_DRAG_PIXELS_PER_ZOOM = 128;
+const TOUCH_ROTATE_PITCH_THRESHOLD_PIXELS = 4;
+const TOUCH_ROTATE_ZOOM_INTENT_LOG_THRESHOLD = 0.02;
 // Cap how much the smoothed log-scale can change per pinch event. 0.18 log2
 // units is about a 1.13x zoom per frame, above intentional pinch rates but
 // low enough to swallow the spike from a single noisy final-lift frame.
@@ -829,31 +831,11 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     if (!this.isDragging()) {
       return false;
     }
-    const {inertia} = this;
-    if (this.touchRotate && inertia && event.velocityY) {
-      const pos = this.getCenter(event);
-      const endPos: [number, number] = [pos[0], (pos[1] += (event.velocityY * inertia) / 2)];
-      const newControllerState = this.controllerState.rotate({pos: endPos});
-      this.updateViewport(
-        newControllerState,
-        {
-          ...this._getTransitionProps(),
-          transitionDuration: inertia,
-          transitionEasing: INERTIA_EASING
-        },
-        {
-          isDragging: false,
-          isRotating: true
-        }
-      );
-      this.blockEvents(inertia);
-    } else {
-      const newControllerState = this.controllerState.rotateEnd();
-      this.updateViewport(newControllerState, null, {
-        isDragging: false,
-        isRotating: false
-      });
-    }
+    const newControllerState = this.controllerState.rotateEnd();
+    this.updateViewport(newControllerState, null, {
+      isDragging: false,
+      isRotating: false
+    });
     return true;
   }
 
@@ -867,6 +849,7 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     const newControllerState = this.controllerState.zoomStart({pos}).rotateStart({pos});
     // hack - hammer's `rotation` field doesn't seem to produce the correct angle
     pinchEventWorkaround._startPinchRotation = event.rotation;
+    pinchEventWorkaround._startPinchCenter = pos;
     pinchEventWorkaround._lastPinchEvent = event;
     pinchEventWorkaround._smoothedPinchScaleLog = 0;
     this.updateViewport(newControllerState, NO_TRANSITION_PROPS, {isDragging: true});
@@ -883,9 +866,19 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     }
 
     let newControllerState = this.controllerState;
+    const pos = this.getCenter(event);
+    const startPinchCenter = pinchEventWorkaround._startPinchCenter as
+      | [number, number]
+      | undefined;
+    const pinchDeltaY = startPinchCenter ? pos[1] - startPinchCenter[1] : 0;
+    const isTouchPinch = this._isTouchPointerEvent(event);
+    const hasTouchPitchIntent =
+      this.touchRotate &&
+      isTouchPinch &&
+      Math.abs(pinchDeltaY) >= TOUCH_ROTATE_PITCH_THRESHOLD_PIXELS;
+    let didZoom = false;
     if (this.touchZoom) {
       const {scale} = event;
-      const pos = this.getCenter(event);
       // Apply the raw pinch scale in log space, clamped per event so a single
       // noisy frame, especially on touch lift, cannot introduce a jump.
       const rawScaleLog = Math.log2(scale);
@@ -893,12 +886,23 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
       const smoothedScaleLog =
         previousScaleLog + clampPinchZoomDelta(rawScaleLog - previousScaleLog);
       pinchEventWorkaround._smoothedPinchScaleLog = smoothedScaleLog;
-      newControllerState = newControllerState.zoom({pos, scale: Math.pow(2, smoothedScaleLog)});
+      const hasZoomIntent =
+        !hasTouchPitchIntent ||
+        Math.abs(smoothedScaleLog) >= TOUCH_ROTATE_ZOOM_INTENT_LOG_THRESHOLD;
+      if (hasZoomIntent && smoothedScaleLog !== 0) {
+        newControllerState = newControllerState.zoom({pos, scale: Math.pow(2, smoothedScaleLog)});
+        didZoom = true;
+      }
     }
     if (this.touchRotate) {
       const {rotation} = event;
-      const {startPitch} = newControllerState.getState();
-      const currentPitch = newControllerState.getViewportProps().pitch;
+      const {startPitch, startRotatePos} = newControllerState.getState();
+      let currentPitch = newControllerState.getViewportProps().pitch;
+      if (startRotatePos && Math.abs(pinchDeltaY) >= TOUCH_ROTATE_PITCH_THRESHOLD_PIXELS) {
+        currentPitch = newControllerState
+          .rotate({pos: [startRotatePos[0], pos[1]]})
+          .getViewportProps().pitch;
+      }
       const deltaAngleY =
         typeof startPitch === 'number' && typeof currentPitch === 'number'
           ? currentPitch - startPitch
@@ -911,8 +915,8 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
 
     this.updateViewport(newControllerState, NO_TRANSITION_PROPS, {
       isDragging: true,
-      isPanning: this.touchZoom,
-      isZooming: this.touchZoom,
+      isPanning: didZoom,
+      isZooming: didZoom,
       isRotating: this.touchRotate
     });
     pinchEventWorkaround._lastPinchEvent = event;
@@ -969,6 +973,7 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
       });
     }
     pinchEventWorkaround._startPinchRotation = null;
+    pinchEventWorkaround._startPinchCenter = null;
     pinchEventWorkaround._lastPinchEvent = null;
     pinchEventWorkaround._smoothedPinchScaleLog = null;
     return true;
