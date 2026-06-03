@@ -672,7 +672,7 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     if (this._doubleTapDragState?.active) {
       return this._onDoubleTapDragEnd(event);
     }
-    if (this._panBlockedByTouchPitch) {
+    if (this._panBlockedByTouchPitch || this.isTouchPitchGestureActive()) {
       this._panBlockedByTouchPitch = false;
       return false;
     }
