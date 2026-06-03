@@ -143,6 +143,7 @@ test('Deck wires mjolnir simultaneous and requireFailure recognizers', async () 
           expect(requiredFailures('pinch'), 'pinch does not wait for multipan').not.toContain(
             'multipan'
           );
+          expect(requiredFailures('pan'), 'pan waits for pinch').toContain('pinch');
           expect(requiredFailures('pan'), 'pan waits for multipan').toContain('multipan');
           expect(requiredFailures('click'), 'click waits for dblclick').toContain('dblclick');
 

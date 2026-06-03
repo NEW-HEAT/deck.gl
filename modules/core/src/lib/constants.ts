@@ -103,7 +103,7 @@ export const EVENT_HANDLERS = {
 export const RECOGNIZERS = {
   multipan: [Pan, {threshold: 10, direction: InputDirection.Vertical, pointers: 2}],
   pinch: [Pinch, {}, ['multipan']],
-  pan: [Pan, {threshold: 1}, ['pinch'], ['multipan']],
+  pan: [Pan, {threshold: 1}, null, ['pinch', 'multipan']],
   dblclick: [Tap, {event: 'dblclick', taps: 2}],
   click: [Tap, {event: 'click'}, null, ['dblclick']]
 } as const;

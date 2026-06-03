@@ -290,6 +290,73 @@ test('GlobeController supports pointer anchored zoom option', () => {
   );
 });
 
+test('GlobeController blocks pan while touch pitch is active', () => {
+  const makePanEvent = (type: string, x: number, y: number) =>
+    ({
+      type,
+      offsetCenter: {x, y},
+      deltaX: x - 50,
+      deltaY: y - 80,
+      velocityX: 0,
+      velocityY: 0,
+      velocity: 0,
+      deltaTime: 16,
+      rightButton: false,
+      srcEvent: {preventDefault() {}, pointerType: 'touch'},
+      stopPropagation() {}
+    }) as any;
+  const makePinchEvent = (type: string, y: number) =>
+    ({
+      type,
+      offsetCenter: {x: 50, y},
+      scale: 1,
+      rotation: 0,
+      deltaTime: 16,
+      srcEvent: {preventDefault() {}, pointerType: 'touch'},
+      stopPropagation() {}
+    }) as any;
+
+  const controller = createTestController({
+    view: new GlobeView({
+      controller: {
+        touchZoom: true,
+        touchRotate: true
+      }
+    }),
+    initialViewState: {
+      longitude: 0,
+      latitude: 0,
+      zoom: 5,
+      pitch: 0,
+      bearing: 0
+    }
+  });
+
+  controller.handleEvent(makePanEvent('panstart', 50, 80));
+  controller.handleEvent(makePinchEvent('pinchstart', 80));
+  controller.handleEvent(makePinchEvent('pinchmove', 40));
+
+  const afterPitch = {
+    longitude: controller.props.longitude as number,
+    latitude: controller.props.latitude as number,
+    pitch: controller.props.pitch as number
+  };
+  expect(afterPitch.pitch, 'touch pinch centroid movement pitches the globe').toBeGreaterThan(0);
+
+  controller.handleEvent(makePanEvent('panmove', 85, 40));
+  controller.handleEvent(makePanEvent('panend', 85, 40));
+
+  expect(controller.props.longitude, 'pan does not move longitude during pitch').toBeCloseTo(
+    afterPitch.longitude
+  );
+  expect(controller.props.latitude, 'pan does not move latitude during pitch').toBeCloseTo(
+    afterPitch.latitude
+  );
+  expect(controller.props.pitch, 'pitch stays owned by the touch pitch gesture').toBeCloseTo(
+    afterPitch.pitch
+  );
+});
+
 test('GlobeController eases low-zoom orientation back after releasing at friction limit', () => {
   const view = new GlobeView({
     controller: {

@@ -185,6 +185,9 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
   private _lastTouchTap: TapRecord | null = null;
   private _touchTapCandidate: TapCandidate | null = null;
   private _doubleTapDragState: DoubleTapDragState | null = null;
+  private _touchMultiPanActive: boolean = false;
+  private _touchPinchPitchActive: boolean = false;
+  private _panBlockedByTouchPitch: boolean = false;
 
   protected invertPan: boolean = false;
   protected dragMode: 'pan' | 'rotate' = 'rotate';
@@ -335,6 +338,10 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
 
   isDragging(): boolean {
     return this._interactionState.isDragging || false;
+  }
+
+  protected isTouchPitchGestureActive(): boolean {
+    return this._touchMultiPanActive || this._touchPinchPitchActive;
   }
 
   // When a multi-touch event ends, e.g. pinch, not all pointers are lifted at the same time.
@@ -622,6 +629,11 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     if (this._doubleTapDragState && this._onDoubleTapDragStart(event)) {
       return true;
     }
+    if (this.isTouchPitchGestureActive()) {
+      this._panBlockedByTouchPitch = true;
+      return false;
+    }
+    this._panBlockedByTouchPitch = false;
 
     const pos = this.getCenter(event);
     if (!this.isPointInBounds(pos, event)) {
@@ -646,6 +658,10 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     if (this._doubleTapDragState?.active) {
       return this._onDoubleTapDragZoom(event);
     }
+    if (this.isTouchPitchGestureActive()) {
+      this._panBlockedByTouchPitch = true;
+      return false;
+    }
     if (!this.isDragging()) {
       return false;
     }
@@ -655,6 +671,10 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
   protected _onPanEnd(event: MjolnirGestureEvent): boolean {
     if (this._doubleTapDragState?.active) {
       return this._onDoubleTapDragEnd(event);
+    }
+    if (this._panBlockedByTouchPitch) {
+      this._panBlockedByTouchPitch = false;
+      return false;
     }
     if (!this.isDragging()) {
       return false;
@@ -803,6 +823,7 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
     if (!this.isPointInBounds(pos, event)) {
       return false;
     }
+    this._touchMultiPanActive = true;
     const newControllerState = this.controllerState.rotateStart({pos});
     this.updateViewport(newControllerState, NO_TRANSITION_PROPS, {isDragging: true});
     return true;
@@ -828,6 +849,7 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
   }
 
   protected _onMultiPanEnd(event: MjolnirGestureEvent): boolean {
+    this._touchMultiPanActive = false;
     if (!this.isDragging()) {
       return false;
     }
@@ -876,6 +898,9 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
       this.touchRotate &&
       isTouchPinch &&
       Math.abs(pinchDeltaY) >= TOUCH_ROTATE_PITCH_THRESHOLD_PIXELS;
+    if (hasTouchPitchIntent) {
+      this._touchPinchPitchActive = true;
+    }
     let didZoom = false;
     if (this.touchZoom) {
       const {scale} = event;
@@ -924,6 +949,7 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
   }
 
   protected _onPinchEnd(event: MjolnirGestureEvent): boolean {
+    this._touchPinchPitchActive = false;
     if (!this.isDragging()) {
       return false;
     }
