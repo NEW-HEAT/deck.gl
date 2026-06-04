@@ -898,11 +898,12 @@ export default abstract class Controller<ControllerState extends IViewState<Cont
       this.touchRotate &&
       isTouchPinch &&
       Math.abs(pinchDeltaY) >= TOUCH_ROTATE_PITCH_THRESHOLD_PIXELS;
+    const suppressTouchPitchZoom = this._touchPinchPitchActive || hasTouchPitchIntent;
     if (hasTouchPitchIntent) {
       this._touchPinchPitchActive = true;
     }
     let didZoom = false;
-    if (this.touchZoom) {
+    if (this.touchZoom && !suppressTouchPitchZoom) {
       const {scale} = event;
       // Apply the raw pinch scale in log space, clamped per event so a single
       // noisy frame, especially on touch lift, cannot introduce a jump.

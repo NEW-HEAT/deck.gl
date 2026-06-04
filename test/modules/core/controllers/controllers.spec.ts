@@ -168,7 +168,7 @@ test('MapController allows pinch zoom and two-finger rotate in one gesture', () 
   ).toBeCloseTo(pitchAfterMultiPan);
 });
 
-test('MapController pitches live from touch pinch centroid movement', () => {
+test('MapController pitches live from touch pinch centroid movement without zoom drift', () => {
   const makePinchEvent = (type: string, y: number, scale = 1, rotation = 0) =>
     ({
       type,
@@ -197,7 +197,7 @@ test('MapController pitches live from touch pinch centroid movement', () => {
   });
 
   controller.handleEvent(makePinchEvent('pinchstart', 80));
-  controller.handleEvent(makePinchEvent('pinchmove', 40));
+  controller.handleEvent(makePinchEvent('pinchmove', 40, 1.12));
 
   expect(
     controller.props.pitch,
@@ -355,6 +355,46 @@ test('GlobeController blocks pan while touch pitch is active', () => {
   expect(controller.props.pitch, 'pitch stays owned by the touch pitch gesture').toBeCloseTo(
     afterPitch.pitch
   );
+});
+
+test('GlobeController touch pitch keeps pointer-anchored zoom from panning', () => {
+  const makePinchEvent = (type: string, y: number, scale = 1) =>
+    ({
+      type,
+      offsetCenter: {x: 75, y},
+      scale,
+      rotation: 0,
+      deltaTime: 16,
+      srcEvent: {preventDefault() {}, pointerType: 'touch'},
+      stopPropagation() {}
+    }) as any;
+
+  const controller = createTestController({
+    view: new GlobeView({
+      controller: {
+        touchZoom: true,
+        touchRotate: true,
+        zoomAround: 'pointer'
+      }
+    }),
+    initialViewState: {
+      longitude: 0,
+      latitude: 0,
+      zoom: 5,
+      pitch: 0,
+      bearing: 0
+    }
+  });
+
+  controller.handleEvent(makePinchEvent('pinchstart', 80));
+  controller.handleEvent(makePinchEvent('pinchmove', 40, 1.18));
+
+  expect(controller.props.pitch, 'touch pinch centroid movement pitches the globe').toBeGreaterThan(
+    0
+  );
+  expect(controller.props.zoom, 'touch pitch ignores noisy pinch scale').toBeCloseTo(5);
+  expect(controller.props.longitude, 'touch pitch does not re-anchor longitude').toBeCloseTo(0);
+  expect(controller.props.latitude, 'touch pitch does not re-anchor latitude').toBeCloseTo(0);
 });
 
 test('GlobeController eases low-zoom orientation back after releasing at friction limit', () => {
