@@ -118,6 +118,75 @@ test('Tileset2D#getRequestPriority ranks tiles by viewport coverage', () => {
   tileset.finalize();
 });
 
+test('Tileset2D#getRequestPriority keeps unprojectable tiles within priority tiers', () => {
+  const tileset = new Tileset2D({
+    getTileData,
+    onTileLoad: () => {}
+  });
+  Object.assign(tileset, {
+    _viewport: {
+      width: 100,
+      height: 100,
+      project: ([x, y]) => (x < 0 || y < 0 ? [Number.NaN, Number.NaN] : [x, y])
+    }
+  });
+
+  const selectedUnprojectable = {
+    bbox: {left: -20, top: -20, right: -10, bottom: -10},
+    index: {x: 0, y: 0, z: 10},
+    isSelected: true,
+    isVisible: true,
+    isPrefetch: false
+  };
+  const visibleAtCenter = {
+    bbox: {left: 0, top: 0, right: 100, bottom: 100},
+    index: {x: 1, y: 0, z: 10},
+    isSelected: false,
+    isVisible: true,
+    isPrefetch: false
+  };
+  const visibleUnprojectable = {
+    bbox: {left: -20, top: -20, right: -10, bottom: -10},
+    index: {x: 2, y: 0, z: 10},
+    isSelected: false,
+    isVisible: true,
+    isPrefetch: false
+  };
+  const prefetchAtCenter = {
+    bbox: {left: 0, top: 0, right: 100, bottom: 100},
+    index: {x: 0, y: 0, z: 0},
+    isSelected: false,
+    isVisible: false,
+    isPrefetch: true
+  };
+  const prefetchUnprojectable = {
+    bbox: {left: -20, top: -20, right: -10, bottom: -10},
+    index: {x: 1, y: 0, z: 0},
+    isSelected: false,
+    isVisible: false,
+    isPrefetch: true
+  };
+  const higherZoomPrefetchAtCenter = {
+    bbox: {left: 0, top: 0, right: 100, bottom: 100},
+    index: {x: 0, y: 0, z: 1},
+    isSelected: false,
+    isVisible: false,
+    isPrefetch: true
+  };
+
+  expect((tileset as any)._getRequestPriority(selectedUnprojectable)).toBeLessThan(
+    (tileset as any)._getRequestPriority(visibleAtCenter)
+  );
+  expect((tileset as any)._getRequestPriority(visibleUnprojectable)).toBeLessThan(
+    (tileset as any)._getRequestPriority(prefetchAtCenter)
+  );
+  expect((tileset as any)._getRequestPriority(prefetchUnprojectable)).toBeLessThan(
+    (tileset as any)._getRequestPriority(higherZoomPrefetchAtCenter)
+  );
+
+  tileset.finalize();
+});
+
 test('Tileset2D#updateOnModelMatrix', () => {
   const tileset = new Tileset2D({
     getTileData,

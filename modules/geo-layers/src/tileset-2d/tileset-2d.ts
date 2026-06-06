@@ -56,6 +56,7 @@ const MIN_COVERAGE_ZOOM = 4;
 const SELECTED_TILE_PRIORITY = 0;
 const VISIBLE_TILE_PRIORITY = 1e8;
 const PREFETCH_TILE_PRIORITY = 2e8;
+const MAX_TILE_DISTANCE_PRIORITY = VISIBLE_TILE_PRIORITY - SELECTED_TILE_PRIORITY - 1;
 
 const STRATEGIES = {
   [STRATEGY_DEFAULT]: updateTileStateDefault,
@@ -458,7 +459,7 @@ export class Tileset2D {
 
   private _getRequestPriority(tile: Tile2DHeader): number {
     // RequestScheduler loads lower priority values first.
-    const distance = this._getTileDistanceSquared(tile);
+    const distance = this._getTileDistancePriority(tile);
     if (tile.isSelected) {
       return SELECTED_TILE_PRIORITY + distance;
     }
@@ -473,7 +474,7 @@ export class Tileset2D {
     return -1;
   }
 
-  private _getTileDistanceSquared(tile: Tile2DHeader): number {
+  private _getTileDistancePriority(tile: Tile2DHeader): number {
     const {width, height} = this._viewport || {};
     if (!this._viewport || !width || !height) {
       return 0;
@@ -486,18 +487,19 @@ export class Tileset2D {
         if (this._isPointInPolygon(center, points)) {
           return 0;
         }
-        return points.reduce((minDistance, point, i) => {
+        const distance = points.reduce((minDistance, point, i) => {
           const nextPoint = points[(i + 1) % points.length];
           return Math.min(
             minDistance,
             this._getPointToSegmentDistanceSquared(center, point, nextPoint)
           );
         }, Number.MAX_SAFE_INTEGER);
+        return Math.min(distance, MAX_TILE_DISTANCE_PRIORITY);
       }
     } catch {
-      // Some viewport/tile combinations are not projectable. Keep them valid but lowest priority.
+      // Some viewport/tile combinations are not projectable. Keep them valid but last in tier.
     }
-    return Number.MAX_SAFE_INTEGER;
+    return MAX_TILE_DISTANCE_PRIORITY;
   }
 
   private _getTileScreenCorners(bbox: TileBoundingBox): [number, number][] {

@@ -32,8 +32,7 @@ type ViewState = {
   maxZoom: number;
 };
 
-const MAPTILER_TOKEN = import.meta.env.VITE_MAPTILER_KEY;
-const SATELLITE_TILE_URL = `https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=${MAPTILER_TOKEN}`;
+const BASEMAP_TILE_URL = 'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
 
 const MIAMI_VIEW_STATE: ViewState = {
   longitude: -80.1918,
@@ -303,7 +302,7 @@ function easeInOutCubic(t: number): number {
 }
 
 function makeTileId(url: string): string {
-  return url.match(/satellite-v2\/(\d+\/\d+\/\d+)/)?.[1].replaceAll('/', '-') || 'tile';
+  return url.match(/\/(\d+\/\d+\/\d+)\.png/)?.[1].replaceAll('/', '-') || 'tile';
 }
 
 function DemoPane({
@@ -374,7 +373,7 @@ function DemoPane({
         maxRequests: MAX_REQUESTS,
         refinementStrategy: 'best-available',
         lodStrategy: mode === 'after' ? 'coverage' : 'none',
-        data: [SATELLITE_TILE_URL],
+        data: [BASEMAP_TILE_URL],
         fetch: fetchTile,
         renderSubLayers: props => {
           const {data, tile} = props;
