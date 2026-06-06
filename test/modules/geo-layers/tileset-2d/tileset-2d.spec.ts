@@ -22,6 +22,12 @@ const testViewState = {
 // testViewState should load tile 12-1171-1566
 const testViewport = new WebMercatorViewport(testViewState);
 
+class ResolutionViewport extends WebMercatorViewport {
+  get resolution() {
+    return 1;
+  }
+}
+
 const getTileData = () => Promise.resolve(null);
 
 test('Tileset2D#constructor', () => {
@@ -79,16 +85,14 @@ test('Tileset2D#coverage LOD uses higher minimum coverage zoom for resolution vi
     lodStrategy: 'coverage',
     onTileLoad: () => {}
   });
-  class ResolutionViewport extends WebMercatorViewport {
-    get resolution() {
-      return 1;
-    }
-  }
   const resolutionViewport = new ResolutionViewport(testViewState);
 
   tileset.update(resolutionViewport);
 
-  expect(tileset._cache.get('0-0-0')?.isPrefetch, 'root safety tile is prefetched').toBe(true);
+  expect(tileset._cache.get('0-0-0')?.isPrefetch, 'root tile is not prefetched').not.toBe(true);
+  expect(tileset._cache.get('4-6-4')?.isPrefetch, 'fallback coverage tile is prefetched').toBe(
+    true
+  );
   expect(tileset._cache.get('18-24-6')?.isPrefetch, 'minimum coverage tile is prefetched').toBe(
     true
   );
@@ -96,6 +100,26 @@ test('Tileset2D#coverage LOD uses higher minimum coverage zoom for resolution vi
     tileset._cache.get('585-783-11')?.isPrefetch,
     'nearest lower resolution coverage tile is prefetched'
   ).toBe(true);
+
+  tileset.finalize();
+});
+
+test('Tileset2D#coverage LOD prioritizes closer prefetch ancestors before safety fallback', () => {
+  const tileset = new Tileset2D({
+    getTileData,
+    lodStrategy: 'coverage',
+    onTileLoad: () => {}
+  });
+  const resolutionViewport = new ResolutionViewport(testViewState);
+
+  tileset.update(resolutionViewport);
+
+  expect((tileset as any)._getRequestPriority(tileset._cache.get('585-783-11'))).toBeLessThan(
+    (tileset as any)._getRequestPriority(tileset._cache.get('18-24-6'))
+  );
+  expect((tileset as any)._getRequestPriority(tileset._cache.get('18-24-6'))).toBeLessThan(
+    (tileset as any)._getRequestPriority(tileset._cache.get('4-6-4'))
+  );
 
   tileset.finalize();
 });
@@ -293,6 +317,32 @@ test('Tileset2D#coverage LOD ignores cached descendants that are not direct chil
   expect(staleDescendant.isVisible, 'deeper cached descendant is not used as placeholder').toBe(
     false
   );
+
+  tileset.finalize();
+});
+
+test('Tileset2D#coverage LOD keeps cached root below the resolution fallback floor', () => {
+  const tileset = new Tileset2D({
+    getTileData: () => new Promise(() => {}),
+    lodStrategy: 'coverage',
+    refinementStrategy: 'best-available',
+    onTileLoad: () => {}
+  });
+  Object.assign(tileset, {
+    _viewport: new ResolutionViewport({...testViewState, width: 100, height: 100, zoom: 6})
+  });
+
+  const root = seedTile(tileset, {x: 0, y: 0, z: 0}, true);
+  const fallback = seedTile(tileset, {x: 4, y: 6, z: 4}, true);
+  const selected = seedTile(tileset, {x: 18, y: 24, z: 6}, false);
+
+  (tileset as any)._rebuildTree();
+  (tileset as any)._selectedTiles = [selected];
+  (tileset as any).updateTileStates();
+
+  expect(fallback.isVisible, 'fallback ancestor covers pending selected tile').toBe(true);
+  expect(root.isVisible, 'root remains below the visible fallback floor').toBe(false);
+  expect(selected.isVisible, 'pending selected tile is hidden').toBe(false);
 
   tileset.finalize();
 });

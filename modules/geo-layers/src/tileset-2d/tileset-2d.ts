@@ -52,7 +52,8 @@ export type LODStrategy = 'none' | 'coverage';
 
 const DEFAULT_CACHE_SCALE = 5;
 const COVERAGE_ZOOM_DELTA = 1;
-const MIN_COVERAGE_ZOOM = 6;
+const MIN_RESOLUTION_COVERAGE_ZOOM = 6;
+const MIN_RESOLUTION_FALLBACK_ZOOM = 4;
 const SELECTED_TILE_PRIORITY = 0;
 const VISIBLE_TILE_PRIORITY = 1e8;
 const PREFETCH_TILE_PRIORITY = 2e8;
@@ -150,6 +151,7 @@ export class Tileset2D {
   private _zRange: ZRange | null;
   private _selectedTiles: Tile2DHeader[] | null;
   private _prefetchTiles: Tile2DHeader[];
+  private _prefetchTilePriority: Map<string, number>;
   private _frameNumber: number;
   private _modelMatrix: Matrix4;
   private _modelMatrixInverse: Matrix4;
@@ -192,6 +194,7 @@ export class Tileset2D {
     this._zRange = null;
     this._selectedTiles = null;
     this._prefetchTiles = [];
+    this._prefetchTilePriority = new Map();
     this._frameNumber = 0;
 
     this._modelMatrix = new Matrix4();
@@ -443,7 +446,7 @@ export class Tileset2D {
       refinementStrategy === STRATEGY_DEFAULT &&
       this.opts.lodStrategy === LOD_STRATEGY_COVERAGE
     ) {
-      updateTileStateCoverage(tiles);
+      updateTileStateCoverage(tiles, this._getMinCoverageFallbackZoom());
     } else {
       (typeof refinementStrategy === 'function'
         ? refinementStrategy
@@ -475,9 +478,10 @@ export class Tileset2D {
       return VISIBLE_TILE_PRIORITY + distance;
     }
     if (tile.isPrefetch) {
-      return (
-        PREFETCH_TILE_PRIORITY + this.getTileZoom(tile.index) * PREFETCH_TILE_PRIORITY + distance
-      );
+      const prefetchPriority = this._prefetchTilePriority.get(tile.id);
+      const zoomPriority =
+        prefetchPriority === undefined ? this.getTileZoom(tile.index) : prefetchPriority;
+      return PREFETCH_TILE_PRIORITY + zoomPriority * PREFETCH_TILE_PRIORITY + distance;
     }
     return -1;
   }
@@ -696,39 +700,60 @@ export class Tileset2D {
 
   private _updatePrefetchTiles(): void {
     this._prefetchTiles = [];
+    this._prefetchTilePriority.clear();
     if (this.opts.lodStrategy !== LOD_STRATEGY_COVERAGE || !this._selectedTiles) {
       return;
     }
 
     const minZoom = this._getMinCoverageZoom();
-    const fallbackZoom = this._minZoom ?? 0;
+    const fallbackZoom = this._getMinCoverageFallbackZoom();
     const seen = new Set<string>();
     for (const selectedTile of this._selectedTiles) {
       const selectedZoom = this.getTileZoom(selectedTile.index);
-      if (selectedZoom <= minZoom) {
-        continue;
+      if (selectedZoom > minZoom) {
+        this._updateCoveragePrefetchTiles(selectedTile.index, minZoom, fallbackZoom, seen);
       }
+    }
+  }
 
-      const coverageZoom = Math.max(minZoom, selectedZoom - COVERAGE_ZOOM_DELTA);
-      const coverageZooms = [coverageZoom, minZoom];
-      if (fallbackZoom < minZoom) {
-        coverageZooms.push(fallbackZoom);
-      }
+  private _updateCoveragePrefetchTiles(
+    selectedIndex: TileIndex,
+    minZoom: number,
+    fallbackZoom: number,
+    seen: Set<string>
+  ): void {
+    const selectedZoom = this.getTileZoom(selectedIndex);
+    const coverageZoom = Math.max(minZoom, selectedZoom - COVERAGE_ZOOM_DELTA);
+    const coverageZooms = [coverageZoom, minZoom];
+    if (fallbackZoom < minZoom) {
+      coverageZooms.push(fallbackZoom);
+    }
 
-      for (const zoom of coverageZooms) {
-        const index = this._getAncestorIndex(selectedTile.index, zoom);
-        const id = this.getTileId(index);
-        if (seen.has(id)) {
-          continue;
-        }
-        seen.add(id);
+    for (let priority = 0; priority < coverageZooms.length; priority++) {
+      const index = this._getAncestorIndex(selectedIndex, coverageZooms[priority]);
+      this._addCoveragePrefetchTile(index, priority, seen);
+    }
+  }
 
-        const tile = this._getTile(index, true);
-        if (tile && !tile.isSelected) {
-          tile.isPrefetch = true;
-          this._prefetchTiles.push(tile);
-        }
-      }
+  private _addCoveragePrefetchTile(
+    index: TileIndex,
+    prefetchPriority: number,
+    seen: Set<string>
+  ): void {
+    const id = this.getTileId(index);
+    const existingPriority = this._prefetchTilePriority.get(id);
+    if (existingPriority === undefined || prefetchPriority < existingPriority) {
+      this._prefetchTilePriority.set(id, prefetchPriority);
+    }
+    if (seen.has(id)) {
+      return;
+    }
+    seen.add(id);
+
+    const tile = this._getTile(index, true);
+    if (tile && !tile.isSelected) {
+      tile.isPrefetch = true;
+      this._prefetchTiles.push(tile);
     }
   }
 
@@ -741,9 +766,17 @@ export class Tileset2D {
   }
 
   private _getMinCoverageZoom(): number {
+    const minZoom = this._getMinCoverageFallbackZoom();
+    if (this._viewport?.resolution) {
+      return Math.max(minZoom, MIN_RESOLUTION_COVERAGE_ZOOM);
+    }
+    return minZoom;
+  }
+
+  private _getMinCoverageFallbackZoom(): number {
     const minZoom = this._minZoom ?? 0;
     if (this._viewport?.resolution) {
-      return Math.max(minZoom, MIN_COVERAGE_ZOOM);
+      return Math.max(minZoom, MIN_RESOLUTION_FALLBACK_ZOOM);
     }
     return minZoom;
   }
@@ -786,7 +819,7 @@ function updateTileStateDefault(allTiles: Tile2DHeader[]) {
 // Coverage LOD intentionally keeps coarse ancestors available. For pending selected tiles,
 // render only immediate loaded children above the ancestor so the displayed LOD steps down
 // gradually instead of jumping between stale deep children and very coarse coverage.
-function updateTileStateCoverage(allTiles: Tile2DHeader[]) {
+function updateTileStateCoverage(allTiles: Tile2DHeader[], minPlaceholderZoom: number) {
   for (const tile of allTiles) {
     tile.state = 0;
   }
@@ -796,7 +829,7 @@ function updateTileStateCoverage(allTiles: Tile2DHeader[]) {
         tile.state! |= TILE_STATE_VISIBLE;
       } else {
         setPlaceholderInImmediateChildren(tile);
-        getPlaceholderInAncestors(tile);
+        getPlaceholderInAncestors(tile, minPlaceholderZoom);
       }
     }
   }
@@ -836,9 +869,9 @@ function isTileLoaded(tile: Tile2DHeader): boolean {
 }
 
 // Walk up the tree until we find one ancestor that is loaded. Returns true if successful.
-function getPlaceholderInAncestors(startTile: Tile2DHeader) {
+function getPlaceholderInAncestors(startTile: Tile2DHeader, minZoom = -Infinity) {
   let tile: Tile2DHeader | null = startTile;
-  while (tile) {
+  while (tile && tile.zoom >= minZoom) {
     if (isTileLoaded(tile)) {
       tile.state! |= TILE_STATE_VISIBLE;
       return true;
