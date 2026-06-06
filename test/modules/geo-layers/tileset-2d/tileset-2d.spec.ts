@@ -187,6 +187,70 @@ test('Tileset2D#getRequestPriority keeps unprojectable tiles within priority tie
   tileset.finalize();
 });
 
+test('Tileset2D#coverage LOD keeps immediate child placeholders over coarse ancestors', () => {
+  const tileset = new Tileset2D({
+    getTileData: () => new Promise(() => {}),
+    lodStrategy: 'coverage',
+    refinementStrategy: 'best-available',
+    onTileLoad: () => {}
+  });
+  Object.assign(tileset, {
+    _viewport: new WebMercatorViewport({...testViewState, width: 100, height: 100, zoom: 2})
+  });
+
+  const root = seedTile(tileset, {x: 0, y: 0, z: 0}, true);
+  const selected = seedTile(tileset, {x: 0, y: 0, z: 1}, false);
+  const child = seedTile(tileset, {x: 0, y: 0, z: 2}, true);
+  const grandchild = seedTile(tileset, {x: 0, y: 0, z: 3}, true);
+
+  (tileset as any)._rebuildTree();
+  (tileset as any)._selectedTiles = [selected];
+  (tileset as any).updateTileStates();
+
+  expect(root.isVisible, 'coarse ancestor remains visible underneath').toBe(true);
+  expect(child.isVisible, 'immediate loaded child remains visible as the closest placeholder').toBe(
+    true
+  );
+  expect(selected.isVisible, 'pending selected tile is hidden').toBe(false);
+  expect(grandchild.isVisible, 'deeper stale child is not used').toBe(false);
+
+  tileset.finalize();
+});
+
+test('Tileset2D#coverage LOD caps stale child placeholders while zooming out', () => {
+  const tileset = new Tileset2D({
+    getTileData: () => new Promise(() => {}),
+    lodStrategy: 'coverage',
+    refinementStrategy: 'best-available',
+    onTileLoad: () => {}
+  });
+  Object.assign(tileset, {
+    _viewport: new WebMercatorViewport({...testViewState, width: 100, height: 100, zoom: 2.4})
+  });
+
+  const root = seedTile(tileset, {x: 0, y: 0, z: 0}, true);
+  const selected = seedTile(tileset, {x: 0, y: 0, z: 2}, false);
+  const child = seedTile(tileset, {x: 0, y: 0, z: 3}, true);
+
+  (tileset as any)._rebuildTree();
+  (tileset as any)._selectedTiles = [selected];
+  (tileset as any).updateTileStates();
+
+  expect(root.isVisible, 'coarse ancestor covers while capped child is hidden').toBe(true);
+  expect(child.isVisible, 'child above the current placeholder cap is hidden').toBe(false);
+
+  Object.assign(tileset, {
+    _viewport: new WebMercatorViewport({...testViewState, width: 100, height: 100, zoom: 3.1})
+  });
+  (tileset as any).updateTileStates();
+
+  expect(child.isVisible, 'child is visible when it is within the current placeholder cap').toBe(
+    true
+  );
+
+  tileset.finalize();
+});
+
 test('Tileset2D#updateOnModelMatrix', () => {
   const tileset = new Tileset2D({
     getTileData,
@@ -799,6 +863,18 @@ function validateVisibility(strategy, selectedTiles, tiles) {
     }
   }
   return null;
+}
+
+function seedTile(tileset, index, loaded) {
+  const tile = (tileset as any)._getTile(index, true);
+  tile.content = loaded ? {} : null;
+  Object.assign(tile, {
+    _isLoaded: loaded,
+    _loader: undefined,
+    _isCancelled: false,
+    _needsReload: false
+  });
+  return tile;
 }
 
 function contains(bbox, point) {

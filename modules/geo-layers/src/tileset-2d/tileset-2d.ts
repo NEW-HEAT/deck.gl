@@ -438,9 +438,18 @@ export class Tileset2D {
     }
 
     // Strategy-specific state logic
-    (typeof refinementStrategy === 'function'
-      ? refinementStrategy
-      : STRATEGIES[refinementStrategy])(Array.from(this._cache.values()));
+    const tiles = Array.from(this._cache.values());
+    if (
+      refinementStrategy === STRATEGY_DEFAULT &&
+      this.opts.lodStrategy === LOD_STRATEGY_COVERAGE
+    ) {
+      updateTileStateCoverage(tiles);
+      this._limitCoveragePlaceholderZoom(tiles);
+    } else {
+      (typeof refinementStrategy === 'function'
+        ? refinementStrategy
+        : STRATEGIES[refinementStrategy])(tiles);
+    }
 
     i = 0;
     // Check if any visibility has changed
@@ -456,6 +465,25 @@ export class Tileset2D {
   /* Private methods */
 
   private _getCullBounds = memoize(getCullBounds);
+
+  private _limitCoveragePlaceholderZoom(tiles: Tile2DHeader[]): void {
+    // Prevent stale high-resolution child placeholders from reappearing while zooming out.
+    // Selected tiles are still allowed to render at their requested zoom.
+    const maxPlaceholderZoom = this._getViewportTileZoom();
+    for (const tile of tiles) {
+      if (tile.isVisible && !tile.isSelected && this.getTileZoom(tile.index) > maxPlaceholderZoom) {
+        tile.isVisible = false;
+      }
+    }
+  }
+
+  private _getViewportTileZoom(): number {
+    const {tileSize = 512, zoomOffset = 0} = this.opts;
+    const zoom = (this._viewport?.zoom || 0) + zoomOffset;
+    return this._viewport?.isGeospatial
+      ? Math.floor(zoom + Math.log2(512 / tileSize))
+      : Math.ceil(zoom);
+  }
 
   private _getRequestPriority(tile: Tile2DHeader): number {
     // RequestScheduler loads lower priority values first.
@@ -769,6 +797,28 @@ function updateTileStateDefault(allTiles: Tile2DHeader[]) {
   }
 }
 
+// Coverage LOD intentionally keeps coarse ancestors available. For pending selected tiles,
+// render only immediate loaded children above the ancestor so the displayed LOD steps down
+// gradually instead of jumping between stale deep children and very coarse coverage.
+function updateTileStateCoverage(allTiles: Tile2DHeader[]) {
+  for (const tile of allTiles) {
+    tile.state = 0;
+  }
+  for (const tile of allTiles) {
+    if (tile.isSelected) {
+      if (isTileLoaded(tile)) {
+        tile.state! |= TILE_STATE_VISIBLE;
+      } else {
+        setPlaceholderInImmediateChildren(tile);
+        getPlaceholderInAncestors(tile);
+      }
+    }
+  }
+  for (const tile of allTiles) {
+    tile.isVisible = Boolean(tile.state! & TILE_STATE_VISIBLE);
+  }
+}
+
 // Until a selected tile and all its selected siblings are loaded, use the closest ancestor as placeholder
 function updateTileStateReplace(allTiles: Tile2DHeader[]) {
   for (const tile of allTiles) {
@@ -795,11 +845,15 @@ function updateTileStateReplace(allTiles: Tile2DHeader[]) {
   }
 }
 
+function isTileLoaded(tile: Tile2DHeader): boolean {
+  return tile.isLoaded || Boolean(tile.content);
+}
+
 // Walk up the tree until we find one ancestor that is loaded. Returns true if successful.
 function getPlaceholderInAncestors(startTile: Tile2DHeader) {
   let tile: Tile2DHeader | null = startTile;
   while (tile) {
-    if (tile.isLoaded || tile.content) {
+    if (isTileLoaded(tile)) {
       tile.state! |= TILE_STATE_VISIBLE;
       return true;
     }
@@ -808,10 +862,18 @@ function getPlaceholderInAncestors(startTile: Tile2DHeader) {
   return false;
 }
 
+function setPlaceholderInImmediateChildren(tile: Tile2DHeader): void {
+  for (const child of tile.children || []) {
+    if (isTileLoaded(child)) {
+      child.state! |= TILE_STATE_VISIBLE;
+    }
+  }
+}
+
 // Recursively set children as placeholder
 function getPlaceholderInChildren(tile) {
   for (const child of tile.children) {
-    if (child.isLoaded || child.content) {
+    if (isTileLoaded(child)) {
       child.state |= TILE_STATE_VISIBLE;
     } else {
       getPlaceholderInChildren(child);
