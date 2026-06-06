@@ -73,6 +73,33 @@ test('Tileset2D#update with coverage LOD', () => {
   tileset.finalize();
 });
 
+test('Tileset2D#coverage LOD uses higher minimum coverage zoom for resolution viewports', () => {
+  const tileset = new Tileset2D({
+    getTileData,
+    lodStrategy: 'coverage',
+    onTileLoad: () => {}
+  });
+  class ResolutionViewport extends WebMercatorViewport {
+    get resolution() {
+      return 1;
+    }
+  }
+  const resolutionViewport = new ResolutionViewport(testViewState);
+
+  tileset.update(resolutionViewport);
+
+  expect(tileset._cache.get('0-0-0')?.isPrefetch, 'root safety tile is prefetched').toBe(true);
+  expect(tileset._cache.get('18-24-6')?.isPrefetch, 'minimum coverage tile is prefetched').toBe(
+    true
+  );
+  expect(
+    tileset._cache.get('585-783-11')?.isPrefetch,
+    'nearest lower resolution coverage tile is prefetched'
+  ).toBe(true);
+
+  tileset.finalize();
+});
+
 test('Tileset2D#getRequestPriority ranks tiles by viewport coverage', () => {
   const tileset = new Tileset2D({
     getTileData,

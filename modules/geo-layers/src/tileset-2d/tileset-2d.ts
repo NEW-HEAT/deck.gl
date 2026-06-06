@@ -52,7 +52,7 @@ export type LODStrategy = 'none' | 'coverage';
 
 const DEFAULT_CACHE_SCALE = 5;
 const COVERAGE_ZOOM_DELTA = 1;
-const MIN_COVERAGE_ZOOM = 4;
+const MIN_COVERAGE_ZOOM = 6;
 const SELECTED_TILE_PRIORITY = 0;
 const VISIBLE_TILE_PRIORITY = 1e8;
 const PREFETCH_TILE_PRIORITY = 2e8;
@@ -701,6 +701,7 @@ export class Tileset2D {
     }
 
     const minZoom = this._getMinCoverageZoom();
+    const fallbackZoom = this._minZoom ?? 0;
     const seen = new Set<string>();
     for (const selectedTile of this._selectedTiles) {
       const selectedZoom = this.getTileZoom(selectedTile.index);
@@ -709,7 +710,12 @@ export class Tileset2D {
       }
 
       const coverageZoom = Math.max(minZoom, selectedZoom - COVERAGE_ZOOM_DELTA);
-      for (const zoom of [coverageZoom, minZoom]) {
+      const coverageZooms = [coverageZoom, minZoom];
+      if (fallbackZoom < minZoom) {
+        coverageZooms.push(fallbackZoom);
+      }
+
+      for (const zoom of coverageZooms) {
         const index = this._getAncestorIndex(selectedTile.index, zoom);
         const id = this.getTileId(index);
         if (seen.has(id)) {
