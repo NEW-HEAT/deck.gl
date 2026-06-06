@@ -32,7 +32,8 @@ type ViewState = {
   maxZoom: number;
 };
 
-const BASEMAP_TILE_URL = 'https://a.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
+const BASEMAP_TILE_URL =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
 
 const MIAMI_VIEW_STATE: ViewState = {
   longitude: -80.1918,
@@ -302,7 +303,8 @@ function easeInOutCubic(t: number): number {
 }
 
 function makeTileId(url: string): string {
-  return url.match(/\/(\d+\/\d+\/\d+)\.png/)?.[1].replaceAll('/', '-') || 'tile';
+  const tilePath = url.match(/\/(\d+)\/(\d+)\/(\d+)(?:\.\w+)?(?:[?#].*)?$/);
+  return tilePath ? `${tilePath[1]}-${tilePath[3]}-${tilePath[2]}` : 'tile';
 }
 
 function DemoPane({
