@@ -51,7 +51,7 @@ export type RefinementStrategy =
 export type LODStrategy = 'none' | 'coverage';
 
 const DEFAULT_CACHE_SCALE = 5;
-const COVERAGE_ZOOM_DELTA = 2;
+const COVERAGE_ZOOM_DELTA = 1;
 const MIN_COVERAGE_ZOOM = 4;
 const SELECTED_TILE_PRIORITY = 0;
 const VISIBLE_TILE_PRIORITY = 1e8;

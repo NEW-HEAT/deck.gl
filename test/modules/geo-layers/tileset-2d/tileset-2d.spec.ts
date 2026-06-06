@@ -65,8 +65,8 @@ test('Tileset2D#update with coverage LOD', () => {
 
   expect(tileset._cache.get('0-0-0')?.isPrefetch, 'root coverage tile is prefetched').toBe(true);
   expect(
-    tileset._cache.get('292-391-10')?.isPrefetch,
-    'lower resolution coverage tile is prefetched'
+    tileset._cache.get('585-783-11')?.isPrefetch,
+    'nearest lower resolution coverage tile is prefetched'
   ).toBe(true);
   expect(tileset._cache.get('1171-1566-12')?.isSelected, 'target tile remains selected').toBe(true);
 
