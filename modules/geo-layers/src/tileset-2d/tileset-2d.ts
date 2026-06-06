@@ -444,7 +444,6 @@ export class Tileset2D {
       this.opts.lodStrategy === LOD_STRATEGY_COVERAGE
     ) {
       updateTileStateCoverage(tiles);
-      this._limitCoveragePlaceholderZoom(tiles);
     } else {
       (typeof refinementStrategy === 'function'
         ? refinementStrategy
@@ -465,25 +464,6 @@ export class Tileset2D {
   /* Private methods */
 
   private _getCullBounds = memoize(getCullBounds);
-
-  private _limitCoveragePlaceholderZoom(tiles: Tile2DHeader[]): void {
-    // Prevent stale high-resolution child placeholders from reappearing while zooming out.
-    // Selected tiles are still allowed to render at their requested zoom.
-    const maxPlaceholderZoom = this._getViewportTileZoom();
-    for (const tile of tiles) {
-      if (tile.isVisible && !tile.isSelected && this.getTileZoom(tile.index) > maxPlaceholderZoom) {
-        tile.isVisible = false;
-      }
-    }
-  }
-
-  private _getViewportTileZoom(): number {
-    const {tileSize = 512, zoomOffset = 0} = this.opts;
-    const zoom = (this._viewport?.zoom || 0) + zoomOffset;
-    return this._viewport?.isGeospatial
-      ? Math.floor(zoom + Math.log2(512 / tileSize))
-      : Math.ceil(zoom);
-  }
 
   private _getRequestPriority(tile: Tile2DHeader): number {
     // RequestScheduler loads lower priority values first.
@@ -864,7 +844,7 @@ function getPlaceholderInAncestors(startTile: Tile2DHeader) {
 
 function setPlaceholderInImmediateChildren(tile: Tile2DHeader): void {
   for (const child of tile.children || []) {
-    if (isTileLoaded(child)) {
+    if (isTileLoaded(child) && child.zoom === tile.zoom + 1) {
       child.state! |= TILE_STATE_VISIBLE;
     }
   }

@@ -217,7 +217,7 @@ test('Tileset2D#coverage LOD keeps immediate child placeholders over coarse ance
   tileset.finalize();
 });
 
-test('Tileset2D#coverage LOD caps stale child placeholders while zooming out', () => {
+test('Tileset2D#coverage LOD keeps direct child placeholders while zooming out', () => {
   const tileset = new Tileset2D({
     getTileData: () => new Promise(() => {}),
     lodStrategy: 'coverage',
@@ -236,16 +236,35 @@ test('Tileset2D#coverage LOD caps stale child placeholders while zooming out', (
   (tileset as any)._selectedTiles = [selected];
   (tileset as any).updateTileStates();
 
-  expect(root.isVisible, 'coarse ancestor covers while capped child is hidden').toBe(true);
-  expect(child.isVisible, 'child above the current placeholder cap is hidden').toBe(false);
+  expect(root.isVisible, 'coarse ancestor remains visible underneath').toBe(true);
+  expect(child.isVisible, 'direct child remains visible while selected tile is pending').toBe(true);
 
-  Object.assign(tileset, {
-    _viewport: new WebMercatorViewport({...testViewState, width: 100, height: 100, zoom: 3.1})
+  tileset.finalize();
+});
+
+test('Tileset2D#coverage LOD ignores cached descendants that are not direct children', () => {
+  const tileset = new Tileset2D({
+    getTileData: () => new Promise(() => {}),
+    lodStrategy: 'coverage',
+    refinementStrategy: 'best-available',
+    onTileLoad: () => {}
   });
+  Object.assign(tileset, {
+    _viewport: new WebMercatorViewport({...testViewState, width: 100, height: 100, zoom: 2})
+  });
+
+  const root = seedTile(tileset, {x: 0, y: 0, z: 0}, true);
+  const selected = seedTile(tileset, {x: 0, y: 0, z: 2}, false);
+  const staleDescendant = seedTile(tileset, {x: 0, y: 0, z: 4}, true);
+
+  (tileset as any)._rebuildTree();
+  (tileset as any)._selectedTiles = [selected];
   (tileset as any).updateTileStates();
 
-  expect(child.isVisible, 'child is visible when it is within the current placeholder cap').toBe(
-    true
+  expect(root.isVisible, 'coarse ancestor covers pending selected tile').toBe(true);
+  expect(selected.isVisible, 'pending selected tile is hidden').toBe(false);
+  expect(staleDescendant.isVisible, 'deeper cached descendant is not used as placeholder').toBe(
+    false
   );
 
   tileset.finalize();
