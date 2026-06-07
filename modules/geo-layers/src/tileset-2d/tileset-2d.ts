@@ -93,6 +93,8 @@ export type Tileset2DProps<DataT = any> = {
   debounceTime?: number;
   /** Changes the zoom level at which the tiles are fetched. Needs to be an integer. @default 0 */
   zoomOffset?: number;
+  /** Number of same-zoom neighbor tiles to prefetch around selected tiles. @default 0 */
+  prefetchTileRadius?: number;
   /** The minimum zoom level at which tiles are visible. @default null */
   visibleMinZoom?: number | null;
   /** The maximum zoom level at which tiles are visible. @default null */
@@ -125,6 +127,7 @@ export const DEFAULT_TILESET2D_PROPS: Omit<Required<Tileset2DProps>, 'getTileDat
   maxRequests: 6,
   debounceTime: 0,
   zoomOffset: 0,
+  prefetchTileRadius: 0,
   visibleMinZoom: null,
   visibleMaxZoom: null,
 
@@ -701,19 +704,23 @@ export class Tileset2D {
   private _updatePrefetchTiles(): void {
     this._prefetchTiles = [];
     this._prefetchTilePriority.clear();
-    if (this.opts.lodStrategy !== LOD_STRATEGY_COVERAGE || !this._selectedTiles) {
+    if (!this._selectedTiles) {
       return;
     }
 
-    const minZoom = this._getMinCoverageZoom();
-    const fallbackZoom = this._getMinCoverageFallbackZoom();
     const seen = new Set<string>();
-    for (const selectedTile of this._selectedTiles) {
-      const selectedZoom = this.getTileZoom(selectedTile.index);
-      if (selectedZoom > minZoom) {
-        this._updateCoveragePrefetchTiles(selectedTile.index, minZoom, fallbackZoom, seen);
+    if (this.opts.lodStrategy === LOD_STRATEGY_COVERAGE) {
+      const minZoom = this._getMinCoverageZoom();
+      const fallbackZoom = this._getMinCoverageFallbackZoom();
+      for (const selectedTile of this._selectedTiles) {
+        const selectedZoom = this.getTileZoom(selectedTile.index);
+        if (selectedZoom > minZoom) {
+          this._updateCoveragePrefetchTiles(selectedTile.index, minZoom, fallbackZoom, seen);
+        }
       }
     }
+
+    this._updateEdgePrefetchTiles(seen);
   }
 
   private _updateCoveragePrefetchTiles(
@@ -731,19 +738,59 @@ export class Tileset2D {
 
     for (let priority = 0; priority < coverageZooms.length; priority++) {
       const index = this._getAncestorIndex(selectedIndex, coverageZooms[priority]);
-      this._addCoveragePrefetchTile(index, priority, seen);
+      this._addPrefetchTile(index, seen, priority);
     }
   }
 
-  private _addCoveragePrefetchTile(
+  private _updateEdgePrefetchTiles(seen: Set<string>): void {
+    const radius = Math.max(0, Math.floor(this.opts.prefetchTileRadius));
+    if (!radius || !this._selectedTiles) {
+      return;
+    }
+
+    for (const selectedTile of this._selectedTiles) {
+      const {x, y, z} = selectedTile.index;
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+        continue;
+      }
+
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dy = -radius; dy <= radius; dy++) {
+          if (dx === 0 && dy === 0) {
+            continue;
+          }
+          const index = this._normalizeNeighborIndex({x: x + dx, y: y + dy, z});
+          if (index) {
+            this._addPrefetchTile(index, seen);
+          }
+        }
+      }
+    }
+  }
+
+  private _normalizeNeighborIndex(index: TileIndex): TileIndex | null {
+    if (this._viewport?.isGeospatial) {
+      const scale = Math.pow(2, index.z);
+      const x = ((index.x % scale) + scale) % scale;
+      if (index.y < 0 || index.y >= scale) {
+        return null;
+      }
+      return {x, y: index.y, z: index.z};
+    }
+    return index;
+  }
+
+  private _addPrefetchTile(
     index: TileIndex,
-    prefetchPriority: number,
-    seen: Set<string>
+    seen: Set<string>,
+    prefetchPriority?: number
   ): void {
     const id = this.getTileId(index);
-    const existingPriority = this._prefetchTilePriority.get(id);
-    if (existingPriority === undefined || prefetchPriority < existingPriority) {
-      this._prefetchTilePriority.set(id, prefetchPriority);
+    if (prefetchPriority !== undefined) {
+      const existingPriority = this._prefetchTilePriority.get(id);
+      if (existingPriority === undefined || prefetchPriority < existingPriority) {
+        this._prefetchTilePriority.set(id, prefetchPriority);
+      }
     }
     if (seen.has(id)) {
       return;
