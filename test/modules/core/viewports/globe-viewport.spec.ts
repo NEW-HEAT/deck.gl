@@ -184,6 +184,28 @@ test('GlobeViewport#isPointOnGlobe', () => {
   expect(viewport.isPointOnGlobe([0, 0]), 'corner misses the globe').toBe(false);
 });
 
+test('GlobeViewport#panByGlobeAnchor uses shortest longitude delta', () => {
+  const viewport = new GlobeViewport({
+    width: 800,
+    height: 600,
+    latitude: 0,
+    longitude: 170,
+    zoom: 2
+  });
+  const pixel = [520, viewport.height / 2];
+  const currentAtPixel = viewport.unproject(pixel);
+
+  expect(viewport.isPointOnGlobe(pixel), 'test pixel intersects the globe').toBe(true);
+  const next = viewport.panByGlobeAnchor([currentAtPixel[0] + 360, currentAtPixel[1]], pixel);
+
+  expect(next.longitude, 'wrapped equivalent anchor does not pan longitude').toBeCloseTo(
+    viewport.longitude
+  );
+  expect(next.latitude, 'wrapped equivalent anchor does not pan latitude').toBeCloseTo(
+    viewport.latitude
+  );
+});
+
 test('GlobeViewport#getBounds', () => {
   for (const testCase of TEST_VIEWPORTS) {
     const bounds = new GlobeViewport(testCase).getBounds();

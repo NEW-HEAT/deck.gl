@@ -32,6 +32,11 @@ function getDistanceScales() {
   };
 }
 
+function normalizeLongitudeDelta(delta: number): number {
+  const wrapped = ((((delta + 180) % 360) + 360) % 360) - 180;
+  return Math.abs(wrapped) < 1e-12 ? 0 : wrapped;
+}
+
 export type GlobeViewportOptions = {
   /** Name of the viewport */
   id?: string;
@@ -370,7 +375,9 @@ export default class GlobeViewport extends Viewport {
       )
     );
     const anchorStrength = 1 - edgeProgress * (1 - GLOBE_ZOOM_ANCHOR_MIN_STRENGTH);
-    const longitude = this.longitude + (anchorLngLat[0] - currentAtPixel[0]) * anchorStrength;
+    const longitude =
+      this.longitude +
+      normalizeLongitudeDelta(anchorLngLat[0] - currentAtPixel[0]) * anchorStrength;
     const latitude = Math.max(
       Math.min(this.latitude + (anchorLngLat[1] - currentAtPixel[1]) * anchorStrength, 90),
       -90
