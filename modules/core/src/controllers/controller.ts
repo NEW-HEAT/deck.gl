@@ -32,7 +32,7 @@ const TAP_MAX_DISTANCE = 12;
 const DOUBLE_TAP_MAX_DELAY = 350;
 const DOUBLE_TAP_MAX_DISTANCE = 36;
 const DOUBLE_TAP_DRAG_PIXELS_PER_ZOOM = 128;
-const TOUCH_ROTATE_PITCH_THRESHOLD_PIXELS = 4;
+const TOUCH_ROTATE_PITCH_THRESHOLD_PIXELS = 32;
 const TOUCH_ROTATE_ZOOM_INTENT_LOG_THRESHOLD = 0.02;
 // Cap how much the smoothed log-scale can change per pinch event. 0.18 log2
 // units is about a 1.13x zoom per frame, above intentional pinch rates but

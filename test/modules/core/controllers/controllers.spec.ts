@@ -206,6 +206,43 @@ test('MapController pitches live from touch pinch centroid movement without zoom
   expect(controller.props.zoom, 'parallel touch pitch does not zoom-anchor pan').toBeCloseTo(10);
 });
 
+test('MapController treats small touch pinch drift as zoom, not pitch', () => {
+  const makePinchEvent = (type: string, y: number, scale = 1, rotation = 0) =>
+    ({
+      type,
+      offsetCenter: {x: 50, y},
+      scale,
+      rotation,
+      deltaTime: 16,
+      srcEvent: {preventDefault() {}, pointerType: 'touch'},
+      stopPropagation() {}
+    }) as any;
+
+  const controller = createTestController({
+    view: new MapView({
+      controller: {
+        touchZoom: true,
+        touchRotate: true
+      }
+    }),
+    initialViewState: {
+      longitude: -122.45,
+      latitude: 37.78,
+      zoom: 10,
+      pitch: 0,
+      bearing: 0
+    }
+  });
+
+  controller.handleEvent(makePinchEvent('pinchstart', 80));
+  controller.handleEvent(makePinchEvent('pinchmove', 60, 1.12));
+
+  expect(controller.props.pitch, 'minor vertical touch drift does not pitch').toBeCloseTo(0);
+  expect(controller.props.zoom, 'minor vertical touch drift still allows pinch zoom').toBeGreaterThan(
+    10
+  );
+});
+
 test('MapController does not apply touch pitch inertia on lift', () => {
   const makeMultiPanEvent = (type: string, y: number, velocityY = 0) =>
     ({
