@@ -8,6 +8,8 @@ import {
   OrbitView,
   OrthographicView,
   FirstPersonView,
+  TerrainController,
+  _GlobeController as GlobeController,
   _GlobeView as GlobeView
 } from '@deck.gl/core';
 import {Timeline} from '@luma.gl/engine';
@@ -108,6 +110,23 @@ test('GlobeController', async () => {
     // GlobeView cannot be rotated
     ['pan#function key', 'pinch', 'multipan']
   );
+});
+
+test('GlobeController uses terrain-aware behavior by default', () => {
+  const controller = createTestController({
+    view: new GlobeView({controller: true}),
+    initialViewState: {
+      longitude: -122.45,
+      latitude: 37.78,
+      zoom: 1
+    }
+  });
+
+  expect(controller, 'GlobeView default controller is GlobeController').toBeInstanceOf(
+    GlobeController
+  );
+  expect(controller, 'GlobeController inherits terrain behavior').toBeInstanceOf(TerrainController);
+  controller.finalize();
 });
 
 test('GlobeController supports pointer anchored zoom option', () => {
