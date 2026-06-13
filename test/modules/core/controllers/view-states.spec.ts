@@ -8,13 +8,17 @@ import {
   OrbitController,
   FirstPersonController,
   _GlobeController as GlobeController,
+  _GlobeViewport as GlobeViewport,
   OrbitViewport,
   OrthographicController,
-  Viewport
+  Viewport,
+  WebMercatorViewport
 } from '@deck.gl/core';
 import {normalizeViewportProps} from '@math.gl/web-mercator';
 
 const dummyMakeViewport = (props: any) => new Viewport(props);
+const makeGlobeViewViewport = (props: any) =>
+  props.zoom > 12 ? new WebMercatorViewport(props) : new GlobeViewport(props);
 
 test('MapViewState', () => {
   const MapViewState = new MapController({} as any).ControllerState;
@@ -171,6 +175,242 @@ test('GlobeViewState', () => {
     'small bounds#latitude is adjusted'
   ).toBeTruthy();
   expect(viewportProps.zoom > 12, 'small bounds#zoom is adjusted').toBeTruthy();
+});
+
+test('GlobeViewState applies zoom-parametric latitude and low-zoom orientation constraints', () => {
+  const GlobeViewState = new GlobeController({} as any).ControllerState;
+
+  let viewState = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 80,
+    zoom: 2,
+    bearing: 90,
+    pitch: 40,
+    maxLatitude: [
+      {zoom: 0, maxLatitude: 50},
+      {zoom: 4, maxLatitude: 70}
+    ],
+    lowZoomOrientationReset: {zoomThreshold: 1, zoomRange: 2},
+    makeViewport: dummyMakeViewport
+  });
+  let viewportProps = viewState.getViewportProps();
+
+  expect(viewportProps.latitude, 'latitude follows interpolated zoom limit').toBe(60);
+  expect(viewportProps.zoom, 'latitude clamp does not compensate by zooming').toBe(2);
+  expect(viewportProps.bearing, 'bearing remains interactive in the reset range').toBe(90);
+  expect(viewportProps.pitch, 'pitch remains interactive in the reset range').toBe(40);
+
+  viewState = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 40,
+    zoom: 0,
+    bearing: 90,
+    pitch: 40,
+    maxLatitude: [
+      {zoom: 0, maxLatitude: 50},
+      {zoom: 4, maxLatitude: 70}
+    ],
+    lowZoomOrientationReset: {
+      zoomThreshold: 1,
+      zoomRange: 2,
+      maxBearing: 10,
+      maxPitch: 10,
+      friction: 0.18
+    },
+    makeViewport: dummyMakeViewport
+  });
+  viewportProps = viewState.getViewportProps();
+
+  expect(viewportProps.bearing, 'bearing is resisted below the threshold').toBeCloseTo(24.4);
+  expect(viewportProps.pitch, 'pitch is resisted below the threshold').toBeCloseTo(15.4);
+});
+
+test('GlobeViewState pan clamps maxLatitude before deriving globe zoom', () => {
+  const GlobeViewState = new GlobeController({} as any).ControllerState;
+  const start = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 20,
+    zoom: 1.5,
+    bearing: 0,
+    pitch: 0,
+    maxLatitude: [
+      {zoom: -1, maxLatitude: 25},
+      {zoom: 0, maxLatitude: 35},
+      {zoom: 1.5, maxLatitude: 50},
+      {zoom: 3, maxLatitude: 70}
+    ],
+    makeViewport: dummyMakeViewport
+  });
+
+  const panned = start.panStart({pos: [400, 300]}).pan({pos: [400, 20000]});
+  const viewportProps = panned.getViewportProps();
+
+  expect(viewportProps.latitude, 'pan stays at the latitude ceiling').toBe(50);
+  expect(viewportProps.zoom, 'continuing past the ceiling does not zoom out').toBe(1.5);
+});
+
+test('GlobeViewState zoom cannot cross dynamic min zoom implied by maxLatitude stops', () => {
+  const GlobeViewState = new GlobeController({} as any).ControllerState;
+  const start = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 50,
+    zoom: 1.5,
+    bearing: 0,
+    pitch: 0,
+    maxLatitude: [
+      {zoom: -1, maxLatitude: 25},
+      {zoom: 0, maxLatitude: 35},
+      {zoom: 1.5, maxLatitude: 50},
+      {zoom: 3, maxLatitude: 70}
+    ],
+    makeViewport: dummyMakeViewport
+  });
+
+  const zoomed = start.zoomStart({pos: [400, 300]}).zoom({pos: [400, 300], scale: 0.25});
+  const viewportProps = zoomed.getViewportProps();
+
+  expect(viewportProps.latitude, 'latitude remains at the permitted ceiling').toBe(50);
+  expect(viewportProps.zoom, 'zoom is clamped to the stop that permits this latitude').toBe(1.5);
+});
+
+test('GlobeViewState honors explicit minGlobeZoom at low latitudes', () => {
+  const GlobeViewState = new GlobeController({} as any).ControllerState;
+  const start = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 0,
+    zoom: 1.5,
+    bearing: 0,
+    pitch: 0,
+    minZoom: -1,
+    minGlobeZoom: 1.25,
+    makeViewport: dummyMakeViewport
+  });
+
+  const zoomed = start.zoomStart({pos: [400, 300]}).zoom({pos: [400, 300], scale: 0.125});
+  const viewportProps = zoomed.getViewportProps();
+
+  expect(viewportProps.zoom, 'explicit globe floor prevents disappearing zoom levels').toBe(1.25);
+});
+
+test('GlobeViewState preserves pointer anchored zoom across WebMercator fallback', () => {
+  const GlobeViewState = new GlobeController({} as any).ControllerState;
+
+  const pos: [number, number] = [500, 300];
+  const crossingStartProps = {
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 0,
+    zoom: 11.9,
+    zoomAround: 'pointer',
+    makeViewport: makeGlobeViewViewport
+  };
+  const crossingAnchor = makeGlobeViewViewport(crossingStartProps).unproject(pos);
+  const crossingZoom = new GlobeViewState(crossingStartProps)
+    .zoomStart({pos})
+    .zoom({pos, scale: 1.25})
+    .getViewportProps();
+  const crossingAnchorPosition = makeGlobeViewViewport(crossingZoom).project(crossingAnchor);
+
+  expect(crossingZoom.zoom, 'zoom crosses into WebMercator fallback').toBeGreaterThan(12);
+  expect(crossingAnchorPosition[0], 'fallback viewport keeps the cursor x anchored').toBeCloseTo(
+    pos[0]
+  );
+  expect(crossingAnchorPosition[1], 'fallback viewport keeps the cursor y anchored').toBeCloseTo(
+    pos[1]
+  );
+
+  const highStartProps = {
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 0,
+    zoom: 12.5,
+    zoomAround: 'pointer',
+    makeViewport: makeGlobeViewViewport
+  };
+  const highAnchor = makeGlobeViewViewport(highStartProps).unproject(pos);
+  const highPointerZoom = new GlobeViewState(highStartProps)
+    .zoom({pos, scale: 1.25})
+    .getViewportProps();
+  const highAnchorPosition = makeGlobeViewViewport(highPointerZoom).project(highAnchor);
+
+  const highCenterZoom = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 0,
+    zoom: 12.5,
+    zoomAround: 'center',
+    makeViewport: makeGlobeViewViewport
+  })
+    .zoom({pos, scale: 1.25})
+    .getViewportProps();
+
+  expect(highAnchorPosition[0], 'high zoom pointer x stays anchored').toBeCloseTo(pos[0]);
+  expect(highAnchorPosition[1], 'high zoom pointer y stays anchored').toBeCloseTo(pos[1]);
+  expect(highCenterZoom.longitude, 'high zoom center zoom keeps longitude fixed').toBe(0);
+});
+
+test('GlobeViewState preserves pointer anchored zoom with globe constraints', () => {
+  const GlobeViewState = new GlobeController({} as any).ControllerState;
+  const pos: [number, number] = [600, 300];
+
+  const pointerZoom = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 0,
+    zoom: 2,
+    bearing: 0,
+    pitch: 0,
+    zoomAround: 'pointer',
+    minGlobeZoom: 1.25,
+    maxLatitude: [
+      {zoom: -1, maxLatitude: 25},
+      {zoom: 0, maxLatitude: 35},
+      {zoom: 1.5, maxLatitude: 50},
+      {zoom: 3, maxLatitude: 70}
+    ],
+    makeViewport: makeGlobeViewViewport
+  })
+    .zoom({pos, scale: 2})
+    .getViewportProps();
+
+  const centerZoom = new GlobeViewState({
+    width: 800,
+    height: 600,
+    longitude: 0,
+    latitude: 0,
+    zoom: 2,
+    bearing: 0,
+    pitch: 0,
+    zoomAround: 'center',
+    minGlobeZoom: 1.25,
+    maxLatitude: [
+      {zoom: -1, maxLatitude: 25},
+      {zoom: 0, maxLatitude: 35},
+      {zoom: 1.5, maxLatitude: 50},
+      {zoom: 3, maxLatitude: 70}
+    ],
+    makeViewport: makeGlobeViewViewport
+  })
+    .zoom({pos, scale: 2})
+    .getViewportProps();
+
+  expect(pointerZoom.zoom, 'pointer zoom still changes zoom').toBe(3);
+  expect(pointerZoom.longitude, 'off-center pointer zoom re-anchors longitude').toBeGreaterThan(1);
+  expect(centerZoom.longitude, 'center zoom keeps longitude fixed').toBe(0);
 });
 
 test('OrbitViewState', () => {
