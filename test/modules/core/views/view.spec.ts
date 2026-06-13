@@ -10,7 +10,9 @@ import {
   OrbitView,
   OrthographicView,
   FirstPersonView,
-  _GlobeView as GlobeView
+  WebMercatorViewport,
+  _GlobeView as GlobeView,
+  _GlobeViewport as GlobeViewport
 } from 'deck.gl';
 import {equals} from '@math.gl/core';
 
@@ -163,6 +165,116 @@ test('GlobeView#parameters', () => {
   expect(customView.props.parameters, 'GlobeView culling can be overridden').toMatchObject({
     cullMode: 'none'
   });
+});
+
+test('GlobeView switches to WebMercatorViewport at close zooms', () => {
+  const view = new GlobeView();
+  const baseViewState = {
+    longitude: -122.4,
+    latitude: 37.8,
+    bearing: 0,
+    pitch: 0
+  };
+  const lowZoomViewport = view.makeViewport({
+    width: 100,
+    height: 100,
+    viewState: {...baseViewState, zoom: 12}
+  });
+  const closeZoomViewport = view.makeViewport({
+    width: 100,
+    height: 100,
+    viewState: {...baseViewState, zoom: 12.01}
+  });
+
+  expect(lowZoomViewport, 'zoom 12 still uses globe rendering').toBeInstanceOf(GlobeViewport);
+  expect(closeZoomViewport, 'close zoom uses cheaper Mercator rendering').toBeInstanceOf(
+    WebMercatorViewport
+  );
+
+  const deferredFallbackView = new GlobeView({webMercatorFallbackZoom: 14.5});
+  expect(
+    deferredFallbackView.makeViewport({
+      width: 100,
+      height: 100,
+      viewState: {...baseViewState, zoom: 14}
+    }),
+    'custom fallback threshold keeps close fly-to zooms on the globe'
+  ).toBeInstanceOf(GlobeViewport);
+  expect(
+    deferredFallbackView.makeViewport({
+      width: 100,
+      height: 100,
+      viewState: {...baseViewState, zoom: 14.6}
+    }),
+    'custom fallback threshold still switches to Mercator past the threshold'
+  ).toBeInstanceOf(WebMercatorViewport);
+
+  const globeOnlyView = new GlobeView({webMercatorFallbackZoom: null});
+  expect(
+    globeOnlyView.makeViewport({
+      width: 100,
+      height: 100,
+      viewState: {...baseViewState, zoom: 20}
+    }),
+    'null fallback threshold keeps GlobeViewport at every zoom'
+  ).toBeInstanceOf(GlobeViewport);
+});
+
+test('GlobeView#camera constraints', () => {
+  const view = new GlobeView({
+    controller: true,
+    maxLatitude: [
+      {zoom: 0, maxLatitude: 50},
+      {zoom: 4, maxLatitude: 80}
+    ],
+    maxLatitudeZoomClamp: true,
+    minGlobeZoom: 1.25,
+    lowZoomOrientationReset: {
+      zoomThreshold: 1,
+      zoomRange: 2,
+      maxBearing: 10,
+      maxPitch: 10,
+      friction: 0.18
+    }
+  });
+
+  const viewport = view.makeViewport({
+    width: 100,
+    height: 100,
+    viewState: {
+      longitude: 0,
+      latitude: 70,
+      zoom: 0,
+      bearing: 90,
+      pitch: 40
+    }
+  });
+
+  expect(view.controller, 'constraints are passed to the GlobeController').toMatchObject({
+    maxLatitude: [
+      {zoom: 0, maxLatitude: 50},
+      {zoom: 4, maxLatitude: 80}
+    ],
+    maxLatitudeZoomClamp: true,
+    minGlobeZoom: 1.25,
+    lowZoomOrientationReset: {zoomThreshold: 1, zoomRange: 2}
+  });
+  expect(viewport.latitude, 'viewport latitude is preserved by dynamic min zoom').toBe(70);
+  expect(viewport.zoom, 'viewport zoom is raised to permit the latitude').toBeCloseTo(2.6666667);
+
+  const lowZoomViewport = view.makeViewport({
+    width: 100,
+    height: 100,
+    viewState: {
+      longitude: 0,
+      latitude: 40,
+      zoom: 0,
+      bearing: 90,
+      pitch: 40
+    }
+  });
+  expect(lowZoomViewport.bearing, 'low zoom viewport bearing is resisted').toBeCloseTo(30.3898);
+  expect(lowZoomViewport.pitch, 'low zoom viewport pitch is resisted').toBeCloseTo(18.2188);
 });
 
 test('OrbitView', () => {

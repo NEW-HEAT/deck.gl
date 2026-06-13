@@ -3,7 +3,7 @@
 // Copyright (c) vis.gl contributors
 
 import {clamp} from '@math.gl/core';
-import Controller from './controller';
+import Controller, {type InteractionState} from './controller';
 
 import {MapState, MapStateProps} from './map-controller';
 import type {MapStateInternal} from './map-controller';
@@ -28,6 +28,74 @@ import type {MjolnirGestureEvent} from 'mjolnir.js';
 const DEGREES_TO_RADIANS = Math.PI / 180;
 const RADIANS_TO_DEGREES = 180 / Math.PI;
 
+export type GlobeMaxLatitudeStop =
+  | [zoom: number, maxLatitude: number]
+  | {zoom: number; maxLatitude?: number; latitude?: number};
+
+export type GlobeMaxLatitude = number | GlobeMaxLatitudeStop[];
+
+export type GlobeLowZoomOrientationReset =
+  | number
+  | {
+      /** Zoom at or below which orientation is fully reset to north-up/zero-pitch. */
+      zoomThreshold?: number;
+      /** Alias for zoomThreshold. */
+      zoom?: number;
+      /** Alias for zoomThreshold. */
+      maxZoom?: number;
+      /** Blend distance above the threshold before user orientation is fully restored. */
+      zoomRange?: number;
+      /** Whether bearing is damped to 0. Defaults to true. */
+      bearing?: boolean;
+      /** Whether pitch is damped to 0. Defaults to true. */
+      pitch?: boolean;
+      /** Soft interactive bearing limit while zoomed out before snapping back. Defaults to 30. */
+      maxBearing?: number;
+      /** Soft interactive pitch limit while zoomed out before snapping back. Defaults to 22. */
+      maxPitch?: number;
+      /** Hard bearing cap after friction is applied. Defaults to 75. */
+      hardMaxBearing?: number;
+      /** Hard pitch cap after friction is applied. Defaults to 50. */
+      hardMaxPitch?: number;
+      /** Shared friction for bearing and pitch outside the soft limits. Defaults to 0.18. */
+      friction?: number;
+      /** Bearing friction outside maxBearing. Defaults to friction. */
+      bearingFriction?: number;
+      /** Pitch friction outside maxPitch. Defaults to friction. */
+      pitchFriction?: number;
+      /** Orientation reset transition duration in ms. Defaults to 120. */
+      resetDuration?: number;
+    };
+
+type GlobeConstrainableViewState = {
+  latitude: number;
+  zoom: number;
+  bearing?: number;
+  pitch?: number;
+  maxLatitude?: unknown;
+  maxLatitudeZoomClamp?: unknown;
+  minGlobeZoom?: unknown;
+  lowZoomOrientationReset?: unknown;
+  globeOrientationResetTransition?: unknown;
+};
+
+type GlobeMapStateProps = Required<MapStateProps> & GlobeConstrainableViewState;
+
+type GlobeLatitudeStop = {zoom: number; maxLatitude: number};
+
+type GlobeOrientationConfig = {
+  preserveOrientation: number;
+  resetBearing: boolean;
+  resetPitch: boolean;
+  maxBearing: number;
+  maxPitch: number;
+  hardMaxBearing: number;
+  hardMaxPitch: number;
+  bearingFriction: number;
+  pitchFriction: number;
+  resetDuration: number;
+};
+
 function degreesToPixels(angle: number, zoom: number = 0): number {
   const radians = Math.min(180, angle) * DEGREES_TO_RADIANS;
   const size = GLOBE_RADIUS * 2 * Math.sin(radians / 2);
@@ -40,6 +108,335 @@ function pixelsToDegrees(pixels: number, zoom: number = 0): number {
   return radians * RADIANS_TO_DEGREES;
 }
 
+function finiteNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function normalizeMaxLatitude(value: number): number {
+  return clamp(Math.abs(value), 0, 90);
+}
+
+function getLatitudeStop(stop: unknown): GlobeLatitudeStop | null {
+  if (Array.isArray(stop)) {
+    const zoom = finiteNumber(stop[0]);
+    const maxLatitude = finiteNumber(stop[1]);
+    return zoom === null || maxLatitude === null
+      ? null
+      : {zoom, maxLatitude: normalizeMaxLatitude(maxLatitude)};
+  }
+
+  if (stop && typeof stop === 'object') {
+    const record = stop as Record<string, unknown>;
+    const zoom = finiteNumber(record.zoom);
+    const maxLatitude = finiteNumber(record.maxLatitude ?? record.latitude);
+    return zoom === null || maxLatitude === null
+      ? null
+      : {zoom, maxLatitude: normalizeMaxLatitude(maxLatitude)};
+  }
+
+  return null;
+}
+
+function getLatitudeStops(maxLatitude: unknown): GlobeLatitudeStop[] | null {
+  if (!Array.isArray(maxLatitude)) {
+    return null;
+  }
+
+  const stops = maxLatitude
+    .map(getLatitudeStop)
+    .filter((stop): stop is GlobeLatitudeStop => stop !== null)
+    .sort((a, b) => a.zoom - b.zoom);
+
+  return stops.length > 0 ? stops : null;
+}
+
+export function getGlobeMaxLatitude(maxLatitude: unknown, zoom: number): number | null {
+  const fixed = finiteNumber(maxLatitude);
+  if (fixed !== null) {
+    return normalizeMaxLatitude(fixed);
+  }
+
+  const stops = getLatitudeStops(maxLatitude);
+  if (!stops) return null;
+  if (zoom <= stops[0].zoom) return stops[0].maxLatitude;
+
+  const last = stops[stops.length - 1];
+  if (zoom >= last.zoom) return last.maxLatitude;
+
+  for (let i = 1; i < stops.length; i++) {
+    const previous = stops[i - 1];
+    const next = stops[i];
+    if (zoom <= next.zoom) {
+      const span = next.zoom - previous.zoom;
+      const t = span <= 0 ? 1 : (zoom - previous.zoom) / span;
+      return previous.maxLatitude + (next.maxLatitude - previous.maxLatitude) * t;
+    }
+  }
+
+  return last.maxLatitude;
+}
+
+export function getGlobeMinZoomForLatitude(maxLatitude: unknown, latitude: number): number | null {
+  const stops = getLatitudeStops(maxLatitude);
+  if (!stops) return null;
+
+  const targetLatitude = normalizeMaxLatitude(latitude);
+  if (targetLatitude <= stops[0].maxLatitude) {
+    return stops[0].zoom;
+  }
+
+  for (let i = 1; i < stops.length; i++) {
+    const previous = stops[i - 1];
+    const next = stops[i];
+    const minLatitude = Math.min(previous.maxLatitude, next.maxLatitude);
+    const maxLatitudeValue = Math.max(previous.maxLatitude, next.maxLatitude);
+
+    if (targetLatitude >= minLatitude && targetLatitude <= maxLatitudeValue) {
+      const span = next.maxLatitude - previous.maxLatitude;
+      if (span === 0) {
+        return Math.min(previous.zoom, next.zoom);
+      }
+      const t = (targetLatitude - previous.maxLatitude) / span;
+      return previous.zoom + (next.zoom - previous.zoom) * t;
+    }
+  }
+
+  return stops[stops.length - 1].zoom;
+}
+
+function constrainGlobeLatitude<T extends GlobeConstrainableViewState>(
+  viewState: T,
+  maxLatitude: unknown = viewState.maxLatitude
+): T {
+  let constrained = viewState;
+
+  const latitudeLimit = getGlobeMaxLatitude(maxLatitude, viewState.zoom);
+  if (latitudeLimit !== null) {
+    const latitude = clamp(viewState.latitude, -latitudeLimit, latitudeLimit);
+    if (latitude !== viewState.latitude) {
+      constrained = {...constrained, latitude};
+    }
+  }
+
+  return constrained;
+}
+
+function constrainGlobeZoom<T extends GlobeConstrainableViewState>(
+  viewState: T,
+  maxLatitude: unknown = viewState.maxLatitude,
+  maxLatitudeZoomClamp: unknown = viewState.maxLatitudeZoomClamp,
+  minGlobeZoom: unknown = viewState.minGlobeZoom
+): T {
+  let minZoom = finiteNumber(minGlobeZoom);
+
+  if (maxLatitudeZoomClamp !== false) {
+    const minZoomForLatitude = getGlobeMinZoomForLatitude(maxLatitude, viewState.latitude);
+    if (minZoomForLatitude !== null) {
+      minZoom = minZoom === null ? minZoomForLatitude : Math.max(minZoom, minZoomForLatitude);
+    }
+  }
+
+  if (minZoom === null || viewState.zoom >= minZoom) {
+    return viewState;
+  }
+
+  return {...viewState, zoom: minZoom};
+}
+
+function smoothstep(t: number): number {
+  const x = clamp(t, 0, 1);
+  return x * x * (3 - 2 * x);
+}
+
+function normalizeAngle(value: number): number {
+  return mod(value + 180, 360) - 180;
+}
+
+function normalizeFriction(value: number): number {
+  return clamp(value, 0, 1);
+}
+
+function getLowZoomOrientationConfig(
+  lowZoomOrientationReset: unknown,
+  zoom: number
+): GlobeOrientationConfig | null {
+  if (lowZoomOrientationReset === false || lowZoomOrientationReset == null) {
+    return null;
+  }
+
+  let threshold: number | null = null;
+  let range = 1;
+  let resetBearing = true;
+  let resetPitch = true;
+  let maxBearing = 30;
+  let maxPitch = 22;
+  let hardMaxBearing = 75;
+  let hardMaxPitch = 50;
+  let friction = 0.18;
+  let bearingFriction: number | null = null;
+  let pitchFriction: number | null = null;
+  let resetDuration = 120;
+
+  if (typeof lowZoomOrientationReset === 'number') {
+    threshold = finiteNumber(lowZoomOrientationReset);
+  } else if (typeof lowZoomOrientationReset === 'object') {
+    const record = lowZoomOrientationReset as Record<string, unknown>;
+    threshold = finiteNumber(record.zoomThreshold ?? record.zoom ?? record.maxZoom);
+    range = finiteNumber(record.zoomRange) ?? range;
+    resetBearing = record.bearing !== false;
+    resetPitch = record.pitch !== false;
+    maxBearing = finiteNumber(record.maxBearing) ?? maxBearing;
+    maxPitch = finiteNumber(record.maxPitch) ?? maxPitch;
+    hardMaxBearing = finiteNumber(record.hardMaxBearing) ?? hardMaxBearing;
+    hardMaxPitch = finiteNumber(record.hardMaxPitch) ?? hardMaxPitch;
+    friction = finiteNumber(record.friction) ?? friction;
+    bearingFriction = finiteNumber(record.bearingFriction);
+    pitchFriction = finiteNumber(record.pitchFriction);
+    resetDuration = finiteNumber(record.resetDuration) ?? resetDuration;
+  }
+
+  if (threshold === null) {
+    return null;
+  }
+
+  const preserveOrientation =
+    range <= 0 ? (zoom <= threshold ? 0 : 1) : smoothstep((zoom - threshold) / range);
+
+  if (preserveOrientation >= 1) {
+    return null;
+  }
+
+  maxBearing = clamp(Math.abs(maxBearing), 0, 180);
+  maxPitch = clamp(Math.abs(maxPitch), 0, 90);
+  hardMaxBearing = clamp(Math.max(Math.abs(hardMaxBearing), maxBearing), maxBearing, 180);
+  hardMaxPitch = clamp(Math.max(Math.abs(hardMaxPitch), maxPitch), maxPitch, 90);
+  bearingFriction = normalizeFriction(bearingFriction ?? friction);
+  pitchFriction = normalizeFriction(pitchFriction ?? friction);
+
+  return {
+    preserveOrientation,
+    resetBearing,
+    resetPitch,
+    maxBearing: resetBearing ? maxBearing + (180 - maxBearing) * preserveOrientation : 180,
+    maxPitch: resetPitch ? maxPitch + (90 - maxPitch) * preserveOrientation : 90,
+    hardMaxBearing: resetBearing
+      ? hardMaxBearing + (180 - hardMaxBearing) * preserveOrientation
+      : 180,
+    hardMaxPitch: resetPitch ? hardMaxPitch + (90 - hardMaxPitch) * preserveOrientation : 90,
+    bearingFriction,
+    pitchFriction,
+    resetDuration: Math.max(0, resetDuration)
+  };
+}
+
+function applyFrictionLimit(value: number, softLimit: number, hardLimit: number, friction: number) {
+  const absValue = Math.abs(value);
+  if (absValue <= softLimit) {
+    return value;
+  }
+
+  const sign = Math.sign(value);
+  const resisted = softLimit + (absValue - softLimit) * friction;
+  return sign * Math.min(resisted, hardLimit);
+}
+
+function constrainGlobeOrientation<T extends GlobeConstrainableViewState>(
+  viewState: T,
+  lowZoomOrientationReset: unknown = viewState.lowZoomOrientationReset
+): T {
+  if (viewState.globeOrientationResetTransition === true) {
+    return viewState;
+  }
+
+  const config = getLowZoomOrientationConfig(lowZoomOrientationReset, viewState.zoom);
+  if (!config) {
+    return viewState;
+  }
+
+  let constrained = viewState;
+
+  if (typeof viewState.bearing === 'number') {
+    const bearing = applyFrictionLimit(
+      normalizeAngle(viewState.bearing),
+      config.maxBearing,
+      config.hardMaxBearing,
+      config.bearingFriction
+    );
+    if (bearing !== viewState.bearing) {
+      constrained = {...constrained, bearing};
+    }
+  }
+
+  if (typeof viewState.pitch === 'number') {
+    const pitch = applyFrictionLimit(
+      viewState.pitch,
+      config.maxPitch,
+      config.hardMaxPitch,
+      config.pitchFriction
+    );
+    if (pitch !== viewState.pitch) {
+      constrained = {...constrained, pitch};
+    }
+  }
+
+  return constrained;
+}
+
+function getGlobeOrientationResetProps<T extends GlobeConstrainableViewState>(
+  viewState: T,
+  lowZoomOrientationReset: unknown = viewState.lowZoomOrientationReset
+):
+  | ({bearing?: number; pitch?: number; transitionDuration: number} & Record<string, number>)
+  | null {
+  const config = getLowZoomOrientationConfig(lowZoomOrientationReset, viewState.zoom);
+  if (!config) {
+    return null;
+  }
+
+  const resetProps: {bearing?: number; pitch?: number; transitionDuration: number} = {
+    transitionDuration: config.resetDuration
+  };
+
+  if (config.resetBearing && typeof viewState.bearing === 'number') {
+    const currentBearing = normalizeAngle(viewState.bearing);
+    const bearing = currentBearing * config.preserveOrientation;
+    resetProps.bearing = Math.abs(bearing) < 1e-6 ? 0 : bearing;
+  }
+  if (config.resetPitch && typeof viewState.pitch === 'number') {
+    const pitch = viewState.pitch * config.preserveOrientation;
+    resetProps.pitch = Math.abs(pitch) < 1e-6 ? 0 : pitch;
+  }
+
+  const bearingChanged =
+    resetProps.bearing !== undefined &&
+    resetProps.bearing !== normalizeAngle(viewState.bearing ?? 0);
+  const pitchChanged =
+    resetProps.pitch !== undefined && resetProps.pitch !== (viewState.pitch ?? 0);
+
+  return bearingChanged || pitchChanged
+    ? (resetProps as {bearing?: number; pitch?: number; transitionDuration: number} & Record<
+        string,
+        number
+      >)
+    : null;
+}
+
+export function constrainGlobeViewState<T extends GlobeConstrainableViewState>(
+  viewState: T,
+  maxLatitude: unknown = viewState.maxLatitude,
+  lowZoomOrientationReset: unknown = viewState.lowZoomOrientationReset,
+  maxLatitudeZoomClamp: unknown = viewState.maxLatitudeZoomClamp,
+  minGlobeZoom: unknown = viewState.minGlobeZoom
+): T {
+  return constrainGlobeOrientation(
+    constrainGlobeLatitude(
+      constrainGlobeZoom(viewState, maxLatitude, maxLatitudeZoomClamp, minGlobeZoom),
+      maxLatitude
+    ),
+    lowZoomOrientationReset
+  );
+}
+
 type GlobeZoomAround = 'center' | 'pointer';
 
 type GlobeStateInternal = MapStateInternal & {
@@ -49,6 +446,11 @@ type GlobeStateInternal = MapStateInternal & {
   /** When true, bearing is held fixed during pan (north stays up) */
   startPanLockBearing?: boolean;
   zoomAround?: GlobeZoomAround;
+  maxLatitude?: unknown;
+  maxLatitudeZoomClamp?: unknown;
+  minGlobeZoom?: unknown;
+  lowZoomOrientationReset?: unknown;
+  globeOrientationResetTransition?: unknown;
 };
 
 class GlobeState extends MapState {
@@ -65,6 +467,11 @@ class GlobeState extends MapState {
       startPanAngularRate,
       startPanLockBearing,
       zoomAround,
+      maxLatitude,
+      maxLatitudeZoomClamp,
+      minGlobeZoom,
+      lowZoomOrientationReset,
+      globeOrientationResetTransition,
       ...mapStateOptions
     } = options;
     mapStateOptions.normalize = false;
@@ -76,6 +483,19 @@ class GlobeState extends MapState {
     if (startPanAngularRate !== undefined) s.startPanAngularRate = startPanAngularRate;
     if (startPanLockBearing !== undefined) s.startPanLockBearing = startPanLockBearing;
     if (zoomAround !== undefined) s.zoomAround = zoomAround;
+
+    const globeProps = {
+      ...(maxLatitude !== undefined ? {maxLatitude} : {}),
+      ...(maxLatitudeZoomClamp !== undefined ? {maxLatitudeZoomClamp} : {}),
+      ...(minGlobeZoom !== undefined ? {minGlobeZoom} : {}),
+      ...(lowZoomOrientationReset !== undefined ? {lowZoomOrientationReset} : {}),
+      ...(globeOrientationResetTransition !== undefined ? {globeOrientationResetTransition} : {})
+    };
+
+    if (Object.keys(globeProps).length > 0) {
+      const viewportProps = {...this.getViewportProps(), ...globeProps};
+      (this as any)._viewportProps = this.applyConstraints(viewportProps);
+    }
   }
 
   panStart({pos}: {pos: [number, number]}): GlobeState {
@@ -132,12 +552,24 @@ class GlobeState extends MapState {
       vAngle = clamp(vAngle, maxDown, maxUp);
     }
 
+    const viewportProps = this.getViewportProps() as GlobeMapStateProps;
     const rotated = Globe.rotateFrame(frame, hAngle, vAngle, locked);
-    const zoom = startZoom + zoomAdjust(rotated.latitude, true) - zoomAdjust(frame.latitude, true);
+    const maxLatitude = getGlobeMaxLatitude(viewportProps.maxLatitude, startZoom);
+    const latitude =
+      maxLatitude === null ? rotated.latitude : clamp(rotated.latitude, -maxLatitude, maxLatitude);
+    const zoom = this._constrainZoom(
+      startZoom + zoomAdjust(latitude, true) - zoomAdjust(frame.latitude, true),
+      {...viewportProps, latitude}
+    );
+    const finalMaxLatitude = getGlobeMaxLatitude(viewportProps.maxLatitude, zoom);
+    const finalLatitude =
+      finalMaxLatitude === null
+        ? latitude
+        : clamp(rotated.latitude, -finalMaxLatitude, finalMaxLatitude);
 
     return this._getUpdatedState({
       longitude: rotated.longitude,
-      latitude: rotated.latitude,
+      latitude: finalLatitude,
       bearing: rotated.bearing,
       zoom
     }) as GlobeState;
@@ -216,18 +648,24 @@ class GlobeState extends MapState {
 
   applyConstraints(props: Required<MapStateProps>): Required<MapStateProps> {
     const {longitude, latitude, maxBounds} = props;
-
-    props.zoom = this._constrainZoom(props.zoom, props);
+    let constrainedByMaxLatitude = false;
 
     if (longitude < -180 || longitude > 180) {
       props.longitude = mod(longitude + 180, 360) - 180;
     }
     props.latitude = clamp(latitude, -90, 90);
 
+    const latitudeBeforeMaxLatitude = props.latitude;
+    Object.assign(props, constrainGlobeLatitude(props));
+    constrainedByMaxLatitude ||= props.latitude !== latitudeBeforeMaxLatitude;
+
+    props.zoom = this._constrainZoom(props.zoom, props);
+
     if (props.bearing < -180 || props.bearing > 180) {
       props.bearing = mod(props.bearing + 180, 360) - 180;
     }
     props.pitch = clamp(props.pitch, props.minPitch, props.maxPitch);
+    Object.assign(props, constrainGlobeOrientation(props));
 
     if (maxBounds) {
       props.longitude = clamp(props.longitude, maxBounds[0][0], maxBounds[1][0]);
@@ -263,7 +701,11 @@ class GlobeState extends MapState {
         );
       }
     }
-    if (props.latitude !== latitude) {
+    const latitudeBeforeFinalMaxLatitude = props.latitude;
+    Object.assign(props, constrainGlobeLatitude(props));
+    constrainedByMaxLatitude ||= props.latitude !== latitudeBeforeFinalMaxLatitude;
+
+    if (props.latitude !== latitude && !constrainedByMaxLatitude) {
       props.zoom += zoomAdjust(props.latitude, true) - zoomAdjust(latitude, true);
     }
 
@@ -272,10 +714,12 @@ class GlobeState extends MapState {
 
   _constrainZoom(zoom: number, props?: Required<MapStateProps>): number {
     props ||= this.getViewportProps();
-    const {maxZoom, maxBounds} = props;
-    let {minZoom} = props;
+    const globeProps = props as GlobeMapStateProps;
+    const {maxZoom, maxBounds, maxLatitude, maxLatitudeZoomClamp} = globeProps;
+    let {minZoom} = globeProps;
 
-    const shouldApplyMaxBounds = maxBounds !== null && props.width > 0 && props.height > 0;
+    const shouldApplyMaxBounds =
+      maxBounds !== null && globeProps.width > 0 && globeProps.height > 0;
     if (shouldApplyMaxBounds) {
       const minLatitude = maxBounds[0][1];
       const maxLatitude = maxBounds[1][1];
@@ -289,16 +733,32 @@ class GlobeState extends MapState {
         Math.cos(fitLatitude * DEGREES_TO_RADIANS);
       const h = degreesToPixels(maxBounds[1][1] - maxBounds[0][1]);
       if (w > 0) {
-        minZoom = Math.max(minZoom, Math.log2(props.width / w) + ZOOM0);
+        minZoom = Math.max(minZoom, Math.log2(globeProps.width / w) + ZOOM0);
       }
       if (h > 0) {
-        minZoom = Math.max(minZoom, Math.log2(props.height / h) + ZOOM0);
+        minZoom = Math.max(minZoom, Math.log2(globeProps.height / h) + ZOOM0);
       }
       if (minZoom > maxZoom) minZoom = maxZoom;
     }
 
-    const zoomAdjustment = zoomAdjust(props.latitude, true) - zoomAdjust(0, true);
-    return clamp(zoom, minZoom + zoomAdjustment, maxZoom + zoomAdjustment);
+    const zoomAdjustment = zoomAdjust(globeProps.latitude, true) - zoomAdjust(0, true);
+    let dynamicMinZoom = minZoom + zoomAdjustment;
+    const minGlobeZoom = finiteNumber(globeProps.minGlobeZoom);
+    if (minGlobeZoom !== null) {
+      dynamicMinZoom = Math.max(dynamicMinZoom, minGlobeZoom);
+    }
+    if (maxLatitudeZoomClamp !== false) {
+      const minZoomForLatitude = getGlobeMinZoomForLatitude(maxLatitude, globeProps.latitude);
+      if (minZoomForLatitude !== null) {
+        dynamicMinZoom = Math.max(dynamicMinZoom, minZoomForLatitude);
+      }
+    }
+
+    return clamp(
+      zoom,
+      Math.min(dynamicMinZoom, maxZoom + zoomAdjustment),
+      maxZoom + zoomAdjustment
+    );
   }
 
   private _unprojectZoomAnchor(pos?: [number, number]): [number, number] | undefined {
@@ -351,6 +811,32 @@ export default class GlobeController extends Controller<MapState> {
   // Ring buffer tracking globe position during pan for inertia velocity
   private _panHistory: Array<{longitude: number; latitude: number; timestamp: number}> = [];
 
+  protected updateViewport(
+    newControllerState: MapState,
+    extraProps: Record<string, any> | null = null,
+    interactionState: InteractionState = {}
+  ): void {
+    if (interactionState.isDragging === true || interactionState.isRotating) {
+      extraProps = {...extraProps, globeOrientationResetTransition: false};
+    }
+
+    const isPanOrZoomInteraction = interactionState.isPanning || interactionState.isZooming;
+    if (interactionState.isDragging === false && !isPanOrZoomInteraction) {
+      const viewState = {...newControllerState.getViewportProps(), ...extraProps};
+      const resetProps = getGlobeOrientationResetProps(viewState);
+      if (resetProps) {
+        extraProps = {
+          ...extraProps,
+          ...resetProps,
+          globeOrientationResetTransition: true,
+          transitionInterpolator: this.transition.transitionInterpolator
+        };
+      }
+    }
+
+    super.updateViewport(newControllerState, extraProps, interactionState);
+  }
+
   protected _getTransitionProps(opts?: any) {
     if (opts?.around && this.props.zoomAround !== 'pointer') {
       const centerZoomOpts = {...opts};
@@ -397,8 +883,10 @@ export default class GlobeController extends Controller<MapState> {
       const dt = last.timestamp - first.timestamp;
 
       if (dt > 0) {
-        const viewportProps = this.controllerState.getViewportProps();
+        const viewportProps = this.controllerState.getViewportProps() as GlobeMapStateProps;
         const state = this.controllerState.getState() as GlobeStateInternal;
+        const maxLatitude =
+          getGlobeMaxLatitude(viewportProps.maxLatitude, viewportProps.zoom) ?? 90;
 
         // Compute velocity from the actual positions the globe was at
         const angularDistance = Globe.angularDistance(first, last);
@@ -419,7 +907,11 @@ export default class GlobeController extends Controller<MapState> {
             const vLng = dLng / dt;
             const vLat = dLat / dt;
             endLng = viewportProps.longitude + (vLng * inertia) / 2;
-            endLat = clamp(viewportProps.latitude + (vLat * inertia) / 2, -90, 90);
+            endLat = clamp(
+              viewportProps.latitude + (vLat * inertia) / 2,
+              -maxLatitude,
+              maxLatitude
+            );
 
             interpolator = new GlobeInertiaInterpolator({targetLongitude: endLng});
           } else {
@@ -437,7 +929,7 @@ export default class GlobeController extends Controller<MapState> {
               0
             );
             endLng = endFrame.longitude;
-            endLat = clamp(endFrame.latitude, -90, 90);
+            endLat = clamp(endFrame.latitude, -maxLatitude, maxLatitude);
             interpolator = new GlobeInertiaInterpolator({axis, totalAngle});
           }
 
