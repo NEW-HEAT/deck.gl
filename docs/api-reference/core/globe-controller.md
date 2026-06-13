@@ -1,10 +1,12 @@
 # GlobeController (Experimental)
 
-Inherits from [Base Controller](./controller.md).
+Inherits from [TerrainController](./terrain-controller.md).
 
 The `GlobeController` class can be passed to either the `Deck` class's [controller](./deck.md#controller) prop or a `View` class's [controller](./view.md#controller) prop to specify that viewport interaction should be enabled.
 
 `GlobeController` is the default controller for [GlobeView](./globe-view.md).
+
+Because it inherits from `TerrainController`, the default `GlobeView` controller can follow picked terrain elevation and uses a 3D rotation pivot when depth picking is available.
 
 ## Usage
 
@@ -35,15 +37,17 @@ new Deck({
 
 ## Options
 
-Supports all [Controller options](./controller.md#options) with the following default behavior:
+Supports all [TerrainController options](./terrain-controller.md#options) and [Controller options](./controller.md#options) with the following default behavior:
 
 - `dragPan`: default `'pan'` (drag to pan)
 - `dragRotate`: shift+drag or right-click drag to change bearing and pitch
+- `rotationPivot`: default `'3d'` (rotate around the picked object under the pointer)
 - `touchRotate`: multi-touch rotate to change bearing
 - `keyboard`: arrow keys to pan, +/- to zoom
 - `inertia`: when set to a number (milliseconds), the globe continues spinning after a fling gesture with exponential decay
 - `maxBounds` - constrains the viewport to the specified bounding box `[[minLng, minLat], [maxLng, maxLat]]`
 - `zoomAround`: default `'center'`. Set to `'pointer'` to keep the longitude/latitude under the cursor or touch anchor fixed during wheel, pinch, and double-click zoom. If the anchor is off the rendered globe, zoom falls back to center anchoring.
+- Terrain following requires a layer with `pickable: '3d'`; without one, the controller behaves like a standard `GlobeController`.
 
 ## Custom GlobeController
 

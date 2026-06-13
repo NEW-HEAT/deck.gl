@@ -3,7 +3,8 @@
 // Copyright (c) vis.gl contributors
 
 import {clamp} from '@math.gl/core';
-import Controller, {type InteractionState} from './controller';
+import TerrainController from './terrain-controller';
+import type {InteractionState} from './controller';
 
 import {MapState, MapStateProps} from './map-controller';
 import type {MapStateInternal} from './map-controller';
@@ -793,7 +794,7 @@ class GlobeState extends MapState {
   }
 }
 
-export default class GlobeController extends Controller<MapState> {
+export default class GlobeController extends TerrainController {
   ControllerState = GlobeState;
 
   transition = {
