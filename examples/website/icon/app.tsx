@@ -4,14 +4,15 @@
 
 import React, {useState, useCallback} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Map} from 'react-map-gl/maplibre';
 import {DeckGL} from '@deck.gl/react';
-import {MapView} from '@deck.gl/core';
-import {IconLayer} from '@deck.gl/layers';
+import {_GlobeView as GlobeView, COORDINATE_SYSTEM} from '@deck.gl/core';
+import {IconLayer, GeoJsonLayer} from '@deck.gl/layers';
+import {SimpleMeshLayer} from '@deck.gl/mesh-layers';
+import {SphereGeometry} from '@luma.gl/engine';
 
 import IconClusterLayer from './icon-cluster-layer';
 import type {IconClusterLayerPickingInfo} from './icon-cluster-layer';
-import type {PickingInfo, MapViewState} from '@deck.gl/core';
+import type {PickingInfo, GlobeViewState} from '@deck.gl/core';
 import type {IconLayerProps} from '@deck.gl/layers';
 import {Device} from '@luma.gl/core';
 
@@ -19,17 +20,38 @@ import {Device} from '@luma.gl/core';
 const DATA_URL =
   'https://raw.githubusercontent.com/visgl/deck.gl-data/master/examples/icon/meteorites.json'; // eslint-disable-line
 
-const MAP_VIEW = new MapView({repeat: true});
-const INITIAL_VIEW_STATE: MapViewState = {
+const GLOBE_VIEW = new GlobeView();
+const INITIAL_VIEW_STATE: GlobeViewState = {
   longitude: -35,
   latitude: 36.7,
-  zoom: 1.8,
-  maxZoom: 20,
-  pitch: 0,
-  bearing: 0
+  zoom: 1.5,
+  maxZoom: 20
 };
 
-const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json';
+// Float markers slightly above the globe surface so they aren't z-fighting with the
+// land polygons / earth sphere, while still being occluded on the far side of the globe.
+const ICON_ALTITUDE_METERS = 10000;
+
+const EARTH_RADIUS_METERS = 6.3e6;
+
+// GlobeView has no flat basemap, so draw an earth sphere + landmasses as the background.
+const backgroundLayers = [
+  new SimpleMeshLayer({
+    id: 'earth-sphere',
+    data: [0],
+    mesh: new SphereGeometry({radius: EARTH_RADIUS_METERS, nlat: 18, nlong: 36}),
+    coordinateSystem: COORDINATE_SYSTEM.CARTESIAN,
+    getPosition: [0, 0, 0],
+    getColor: [24, 36, 64]
+  }),
+  new GeoJsonLayer({
+    id: 'earth-land',
+    data: 'https://d2ad6b4ur7yvpq.cloudfront.net/naturalearth-3.3.0/ne_50m_land.geojson',
+    stroked: false,
+    filled: true,
+    getFillColor: [90, 110, 130]
+  })
+];
 
 type Meterite = {
   coordinates: [longitude: number, latitude: number];
@@ -80,15 +102,13 @@ export default function App({
   data = DATA_URL,
   iconMapping = 'data/location-icon-mapping.json',
   iconAtlas = 'data/location-icon-atlas.png',
-  showCluster = true,
-  mapStyle = MAP_STYLE
+  showCluster = true
 }: {
   device?: Device;
   showCluster?: boolean;
   data?: string | Meterite[];
   iconMapping?: string;
   iconAtlas?: string;
-  mapStyle?: string;
 }) {
   const [hoverInfo, setHoverInfo] = useState<IconClusterLayerPickingInfo<Meterite> | null>(null);
 
@@ -121,23 +141,24 @@ export default function App({
     : new IconLayer({
         ...layerProps,
         id: 'icon',
+        getPosition: d => [d.coordinates[0], d.coordinates[1], ICON_ALTITUDE_METERS],
         getIcon: d => 'marker',
         sizeUnits: 'meters',
         sizeScale: 2000,
-        sizeMinPixels: 6
+        sizeMinPixels: 6,
+        // GlobeView flips billboard winding; disable back-face culling so icons stay visible.
+        parameters: {cullMode: 'none'}
       });
   return (
     <DeckGL
       device={device}
-      layers={[layer]}
-      views={MAP_VIEW}
+      layers={[...backgroundLayers, layer]}
+      views={GLOBE_VIEW}
       initialViewState={INITIAL_VIEW_STATE}
-      controller={{dragRotate: false}}
+      controller={true}
       onViewStateChange={hideTooltip}
       onClick={expandTooltip}
     >
-      <Map reuseMaps mapStyle={mapStyle} />
-
       {hoverInfo && renderTooltip(hoverInfo)}
     </DeckGL>
   );
